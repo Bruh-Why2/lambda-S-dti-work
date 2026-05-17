@@ -1,4 +1,4 @@
-open Format
+(* open Format
 
 module Error =
 struct
@@ -69,4 +69,4 @@ struct
   let warning s = warning std_formatter s
   let warningAt pos s = warningAt std_formatter pos s
   let warningBtw ran s = warningBtw std_formatter ran s
-end
+end *)

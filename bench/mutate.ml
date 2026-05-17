@@ -17,9 +17,11 @@
 *)
 
 (* open Format *)
+open Lambda_S_dti
 open Utils.Error
 open Syntax
 open Syntax.ITGL
+
 
 module IntSet = Set.Make (Int)
 module IntMap = Map.Make (Int)

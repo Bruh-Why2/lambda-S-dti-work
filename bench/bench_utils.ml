@@ -1,4 +1,5 @@
 open Unix
+open Lambda_S_dti
 
 (* Measurement options (source-controlled) *)
 type mem_mode = Off | Fast | Corebench

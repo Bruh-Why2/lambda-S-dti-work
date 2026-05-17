@@ -1,12 +1,5 @@
+(include_subdirs unqualified)
+
 (library
   (name lambda_S_dti)
-  (public_name lambda-S-dti)
-  (libraries yojson core core_bench core_unix))
-
-(ocamllex lexer)
-; Though we want to use --infer option in Menhir,
-; it is not supported by dune now:
-; https://github.com/ocaml/dune/issues/305
-(menhir
-  (flags (--explain))
-  (modules parser))
+  (public_name lambda-S-dti))

@@ -1,0 +1,3 @@
+(executable
+ (name bench)
+ (libraries lambda_S_dti yojson core_bench core_unix.command_unix))
