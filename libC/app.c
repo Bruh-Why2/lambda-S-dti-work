@@ -37,8 +37,8 @@ value fun_wrapped_call_funcM(value cls, value arg) {
 	value ret = inner_f->funcM(inner_f_val, _arg);
 	return cast(ret, t12, t22, rid, polarity);
 	#else // CAST
-    crc *c1 = c->crcdat.two_crc.c1;
-    crc *c2 = c->crcdat.two_crc.c2;
+    crc *c1 = c->crcdat.fun_crc.c1;
+    crc *c2 = c->crcdat.fun_crc.c2;
     value _arg = coerce(arg, c1);
 	if (c2 == &crc_id) {
 		return inner_f->funcM(inner_f_val, _arg);
