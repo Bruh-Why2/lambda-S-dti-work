@@ -8,17 +8,6 @@ open Static_manage
 exception ToC_bug of string
 exception ToC_error of string
 
-(*main関数かどうかを判定*)
-let is_main = ref false
-
-let is_alt = ref false
-
-let is_B = ref false
-
-let is_eager = ref false
-
-let is_static = ref false
-
 (*Utilities*)
 (*型のCプログラム表記を出力する関数
   Ground typeとDynamic type以外の型はもともと全てポインタなので&はいらない*)
@@ -171,21 +160,23 @@ let rec toC_crc ppf (c, x) =
   | _ -> raise @@ ToC_bug "bad coercion"
 
 (* ======================================== *)
-let rec toC_mf ppf (x, mf) = match mf with
+let rec toC_mf ppf (x, mf) ~config =
+  let toC_mf = toC_mf ~config in
+  match mf with
   | MatchVar _ | MatchBLit _ | MatchULit -> raise @@ ToC_bug "MatchVar, MatchBLit, MatchULit does not appear in toC"
   | MatchILit i -> 
     fprintf ppf "%s == %d"
       x
       i
   | MatchNil _ -> 
-    if !is_eager then
+    if config.eager then
       fprintf ppf "((lst*)%s) == NULL"
         x
     else
       fprintf ppf "is_NULL((lst*)%s)"
         x
   | MatchCons (mf1, mf2) ->
-    if !is_eager then
+    if config.eager then
       fprintf ppf "((lst*)%s) != NULL && %a && %a"
         x
         toC_mf (asprintf "((lst*)%s)->h" x, mf1)
@@ -198,7 +189,7 @@ let rec toC_mf ppf (x, mf) = match mf with
   | MatchTuple mfs ->
     let counter = ref (-1) in
     let toC_mfi ppf mi =
-      if !is_eager then
+      if config.eager then
         toC_mf ppf (counter := !counter + 1; asprintf "((tpl*)%s)->fields[%d]" x !counter, mi)
       else
         toC_mf ppf (counter := !counter + 1; asprintf "tget((tpl*)%s, %d)" x !counter, mi)
@@ -210,7 +201,9 @@ let rec toC_mf ppf (x, mf) = match mf with
   | MatchWild _ -> 
     fprintf ppf "1"
 
-let rec toC_exp ppf f = match f with
+let rec toC_exp ppf f ~config ~is_main = 
+  let toC_exp = toC_exp ~config ~is_main in
+  match f with
   | Let (x, f1, f2) -> (* 先にxを宣言しておいて，f1の内容をxに代入する *)
     fprintf ppf "value %s;\n%a%a"
       x
@@ -267,7 +260,7 @@ let rec toC_exp ppf f = match f with
         y
         z
     | Hd y -> (* TODO *)
-      if !is_eager then
+      if config.eager then
         fprintf ppf "%s = ((lst*)%s)->h;\n"
           x
           y
@@ -276,7 +269,7 @@ let rec toC_exp ppf f = match f with
           x
           y
     | Tl y -> (* TODO *)
-      if !is_eager then
+      if config.eager then
         fprintf ppf "%s = ((lst*)%s)->t;\n"
           x
           y
@@ -285,7 +278,7 @@ let rec toC_exp ppf f = match f with
           x
           y
     | Tget (y, i) ->
-      if !is_eager then
+      if config.eager then
         fprintf ppf "%s = ((tpl*)%s)->fields[%d];\n"
           x
           y
@@ -311,7 +304,7 @@ let rec toC_exp ppf f = match f with
     | AppMDir (y, z) ->
       fprintf ppf "%s = fun%s_%s(0, %s);\n" (* Insert(x, y z) ~> x = fun_y(z); *) (*yが直接適用できる関数の場合*)
         x
-        (if !is_alt then "_alt" else "")
+        (if config.alt then "_alt" else "")
         y
         z
     | AppMCls (y, z) -> 
@@ -413,7 +406,7 @@ let rec toC_exp ppf f = match f with
     begin match ms with
     | (mf, f) :: t ->
       fprintf ppf "if(%a) {\n%a} else %a"
-        toC_mf (x, mf)
+        (toC_mf ~config) (x, mf)
         toC_exp f
         toC_exp (Match (x, t))
     | [] -> 
@@ -426,9 +419,9 @@ let rec toC_exp ppf f = match f with
       x
       x
       env_size
-      begin if !is_B || !is_static then
+      begin if config.intoB || config.static then
         asprintf "((fun*)%s)->funcM = fun_%s;\n" x l
-      else if !is_alt then
+      else if config.alt then
         asprintf "((fun*)%s)->funcD = fun_%s;\n((fun*)%s)->funcM = fun_alt_%s;\n" x l x l
       else
         asprintf "((fun*)%s)->funcD = fun_%s;\n" x l
@@ -468,7 +461,7 @@ let rec toC_exp ppf f = match f with
   | Var _ | Int _ | Nil | Cons _ | Tuple _ | Add _ | Sub _ | Mul _ | Div _ | Mod _ | Hd _ | Tl _ | Tget _ | AppDDir _ | AppDCls _ | AppMDir _ | AppMCls _ | Cast _ | AppTy _ | CApp _ | Coercion _ | CSeq _ as f ->
     fprintf ppf "value retv;\n%areturn %s;\n"
       toC_exp (Insert ("retv", f))
-      (if !is_main then "0" else "retv")
+      (if is_main then "0" else "retv")
 
 (* =================================== *)
 
@@ -666,7 +659,7 @@ let toC_crccontents ppf l =
     toC_list l
 
 (*型定義全体を記述*)
-let toC_crcs ppf l =
+let toC_crcs ppf l ~config =
   let register_builtins ppf () =
     fprintf ppf "\tregister_static_crc(&crc_id);\n";
     fprintf ppf "\tregister_static_crc(&crc_inj_INT);\n";
@@ -675,7 +668,7 @@ let toC_crcs ppf l =
     fprintf ppf "\tregister_static_crc(&crc_inj_AR);\n";
     fprintf ppf "\tregister_static_crc(&crc_inj_LI);\n"
   in
-  if !is_static then fprintf ppf ""
+  if config.static then fprintf ppf ""
   else if l = [] then 
     fprintf ppf "\n#ifdef HASH\nstatic void init_crcs() {\n%a}\n#endif\n\n"
       register_builtins ()
@@ -694,13 +687,13 @@ let toC_crcs ppf l =
   再帰関数などに対応するために，関数本体の前に，名前を前方定義する
   ここで定義する内容はfun型の関数自体の定義 (*いらない：と，関数が格納されたvalue型の値の二つ*)
   fundef内のfvl(自由変数のリスト)とtvs(型変数のリスト)に要素が入っているかどうかで関数の型が異なるので，四通りの場合分けが発生する*)
-let toC_label ppf fundef = match fundef with
+let toC_label ppf fundef ~config = match fundef with
 | FundefD { name = l; tvs = (_, _); arg = (_, _); formal_fv = _; body = _ } ->
   fprintf ppf "static value fun_%s(value, value, value);"
     l
 | FundefM { name = l; tvs = (_, _); arg = _; formal_fv = _; body = _ } ->
   fprintf ppf "static value fun%s_%s(value, value);"
-    (if !is_alt then "_alt" else "")
+    (if config.alt then "_alt" else "")
     l
 
 (*関数本体の定義*)
@@ -710,7 +703,7 @@ let toC_funv ppf (exists_fun, l) =
   else
     fprintf ppf "value %s = cls;\n" l
 
-let toC_fundef ppf fundef = match fundef with
+let toC_fundef ppf fundef ~config = match fundef with
 | FundefD { name = l; tvs = (tvs, _); arg = (x, y); formal_fv = fvl; body = f } ->
   cnt_env := 0;
   fprintf ppf "static value fun_%s(value cls, value %s, value %s) {\n%a%a%a%a}"
@@ -720,53 +713,47 @@ let toC_fundef ppf fundef = match fundef with
     toC_funv (V.mem (to_id l) (fv_exp f), l)
     toC_fvs fvl
     toC_tvs tvs
-    toC_exp f
+    (toC_exp ~config ~is_main:false) f
 | FundefM { name = l; tvs = (tvs, _); arg = x; formal_fv = fvl; body = f } ->
   cnt_env := 0;
   fprintf ppf "static value fun%s_%s(value cls, value %s) {\n%a%a%a%a}"
-    (if !is_alt then "_alt" else "")
+    (if config.alt then "_alt" else "")
     l
     x
     toC_funv (V.mem (to_id l) (fv_exp f), l)
     toC_fvs fvl
     toC_tvs tvs
-    toC_exp f
+    (toC_exp ~config ~is_main:false) f
   
 (*関数定義全体を記述*)
-let toC_fundefs ppf toplevel =
-  (if toplevel = [] then pp_print_string ppf ""
+let toC_fundefs ppf toplevel ~config =
+  if toplevel = [] then pp_print_string ppf ""
   else let toC_sep ppf () = fprintf ppf "\n\n" in
-  let toC_list ppf labels = pp_print_list toC_label ppf labels ~pp_sep:toC_sep in
+  let toC_list ppf labels = pp_print_list (toC_label ~config) ppf labels ~pp_sep:toC_sep in
   fprintf ppf "%a\n\n"
     toC_list toplevel;
-  let toC_list ppf defs = pp_print_list toC_fundef ppf defs ~pp_sep:toC_sep in
+  let toC_list ppf defs = pp_print_list (toC_fundef ~config) ppf defs ~pp_sep:toC_sep in
   fprintf ppf "%a\n\n" 
-    toC_list toplevel);
-  is_main := true (*関数定義が終わったら，main関数に入ることを知らせる*)
+    toC_list toplevel
 
 (* =================================== *)
 
 (*全体を記述*)
-let toC_program ?(bench=0) ~config ppf (Prog (toplevel, f)) = 
-  is_main := false;
-  is_alt := config.alt;
-  is_B := config.intoB;
-  is_eager := config.eager;
-  is_static := config.static;
+let toC_program ?(bench=0) ~config ppf (Prog (toplevel, f)) =
   let tys = TyManager.get_definitions () in
   let ranges = RangeManager.get_definitions () in
   let crcs = CrcManager.get_definitions () in
-  let init_crcs = if !is_static then "" else "#ifdef HASH\ninit_crcs();\n#endif\n" in
+  let init_crcs = if config.static then "" else "#ifdef HASH\ninit_crcs();\n#endif\n" in
   fprintf ppf "%s\n%s\n%a%a%a%a%s%s%s%a%s"
     (asprintf "#include <gc.h>\n#include \"../%slibC/runtime.h\"\n"
       (if bench = 0 then "" else "../../"))
     (if bench = 0 then "#define GC_INITIAL_HEAP_SIZE 1048576\n" else "")
     toC_tys tys
     toC_ranges ranges
-    toC_crcs crcs
-    toC_fundefs toplevel
-    (if bench = 0 && not !is_static then "range *range_list;\n\n" else "")
+    (toC_crcs ~config) crcs
+    (toC_fundefs ~config) toplevel
+    (if bench = 0 && not config.static then "range *range_list;\n\n" else "")
     (if bench = 0 then asprintf "int main() {\nGC_INIT();\n%s" init_crcs else asprintf "int mutant%d() {\n%s" bench init_crcs)
     (if List.length ranges != 0 then "range_list = local_range_list;\n" else "")
-    toC_exp f
+    (toC_exp ~config ~is_main:true) f
     "}"
