@@ -252,3 +252,6 @@ line 18, character 23 -- line 18, character 24
 - `lib`: Implementation of the calculus
 - `test`: Unit tests
 
+## Compilation Process
+![Compilation_Process](tex/compilation_flow.png)
+

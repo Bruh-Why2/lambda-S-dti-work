@@ -44,3 +44,5 @@ logs/
 scripts/__pycache__/
 
 *.out
+
+*.aux
