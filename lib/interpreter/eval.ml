@@ -295,9 +295,9 @@ module CC = struct
     | FunSExp ((x1, u1), k, f) -> FunSExp ((x1, subst_type s u1), k, subst_exp s f)
     | FixSExp ((x, y, u1, u2), k, f) ->
       FixSExp ((x, y, subst_type s u1, subst_type s u2), k, subst_exp s f)
-    | FunAExp ((x1, u1), k, (f1, f2)) -> FunAExp ((x1, subst_type s u1), k, (subst_exp s f1, subst_exp s f2))
-    | FixAExp ((x, y, u1, u2), k, (f1, f2)) ->
-      FixAExp ((x, y, subst_type s u1, subst_type s u2), k, (subst_exp s f1, subst_exp s f2))
+    | FunDualExp ((x1, u1), k, (f1, f2)) -> FunDualExp ((x1, subst_type s u1), k, (subst_exp s f1, subst_exp s f2))
+    | FixDualExp ((x, y, u1, u2), k, (f1, f2)) ->
+      FixDualExp ((x, y, subst_type s u1, subst_type s u2), k, (subst_exp s f1, subst_exp s f2))
     | NilExp u -> NilExp (subst_type s u)
     | ConsExp (f1, f2) -> ConsExp (subst_exp s f1, subst_exp s f2)
     | TupleExp fs -> TupleExp (List.map (fun f -> subst_exp s f) fs)
@@ -340,7 +340,7 @@ module CC = struct
       begin match v with
         | FunBV proc -> FunBV (fun _ -> proc (xs, us))
         | FunSV proc -> FunSV (fun _ -> proc (xs, us))
-        | FunAV proc -> FunAV (fun _ -> proc (xs, us))
+        | FunDualV proc -> FunDualV (fun _ -> proc (xs, us))
         | _ -> v
       end
     | IConst i -> IntV i
@@ -379,27 +379,27 @@ module CC = struct
           eval env f'
         in f ([], []) (v, w)
       in FunSV f
-    | FunAExp ((x, _), k, (f', f'')) ->
-      FunAV (
+    | FunDualExp ((x, _), k, (f', f'')) ->
+      FunDualV (
         fun (xs, ys) -> 
           (fun v -> eval (Environment.add x ([], v) env) @@ subst_exp (Utils.List.zip xs ys) f'),
           (fun (v, w) -> eval (Environment.add x ([], v) (Environment.add k ([], w) env)) @@ subst_exp (Utils.List.zip xs ys) f'')
       )
-    | FixAExp ((x, y, _, _), k, (f', f'')) ->
+    | FixDualExp ((x, y, _, _), k, (f', f'')) ->
       let f (xs, ys) =
         let f' = subst_exp (Utils.List.zip xs ys) f' in
         let f'' = subst_exp (Utils.List.zip xs ys) f'' in
         let rec f1' v =
-          let env = Environment.add x (xs, FunAV (fun _ -> (f1', f2'))) env in
+          let env = Environment.add x (xs, FunDualV (fun _ -> (f1', f2'))) env in
           let env = Environment.add y ([], v) env in
           eval env f'
         and f2' (v, w) =
-          let env = Environment.add x (xs, FunAV (fun _ -> (f1', f2'))) env in
+          let env = Environment.add x (xs, FunDualV (fun _ -> (f1', f2'))) env in
           let env = Environment.add y ([], v) env in
           let env = Environment.add k ([], w) env in
           eval env f''
         in (f1', f2')
-      in FunAV f
+      in FunDualV f
     | AppMExp (f1, f2) ->
       let v1 = eval env f1 in
       let v2 = eval env f2 in
@@ -624,7 +624,7 @@ module CC = struct
       | _ -> raise @@ Eval_bug (asprintf "cannot coercion value: %a <%a>" Pp.CC.pp_value v Pp.pp_coercion c)
   and eval_app_valD ?(debug=false) env v1 v2 v3 = match v1 with (*値まで評価しきっているので，論文のようなlet k = t;;c in ~~とはできない*)
     | FunSV proc -> proc ([], []) (v2, v3) 
-    | FunAV proc -> 
+    | FunDualV proc -> 
       begin match v3 with
       | CoercionV (CId _) -> fst (proc ([], [])) v2
       | _ -> snd (proc ([], [])) (v2, v3)
@@ -639,7 +639,7 @@ module CC = struct
     | _ -> raise @@ Eval_bug (asprintf "app_valD: application of non procedure value: %a" Pp.CC.pp_value v1)
   and eval_app_valM ?(debug=false) env v1 v2 = match v1 with (*値まで評価しきっているので，論文のようなlet k = t;;c in ~~とはできない*)
     | FunBV proc -> proc ([], []) v2
-    | FunAV proc -> fst (proc ([], [])) v2
+    | FunDualV proc -> fst (proc ([], [])) v2
     | CoerceV (v1, CFun (s, t)) -> eval_app_valD env v1 (coerce v2 s ~debug:debug) (CoercionV t) ~debug:debug
     | _ -> raise @@ Eval_bug (asprintf "app_valM: application of non procedure value: %a" Pp.CC.pp_value v1)
 
@@ -675,8 +675,8 @@ module KNorm = struct
       LetExp (x, subst_exp s f1, subst_exp s f2)
     | LetRecSExp (x, tvs, arg, f1, f2) ->
       LetRecSExp (x, tvs, arg, subst_exp s f1, subst_exp s f2)
-    | LetRecAExp (x, tvs, arg, (f1, f1'), f2) ->
-      LetRecAExp (x, tvs, arg, (subst_exp s f1, subst_exp s f1'), subst_exp s f2)
+    | LetRecDualExp (x, tvs, arg, (f1, f1'), f2) ->
+      LetRecDualExp (x, tvs, arg, (subst_exp s f1, subst_exp s f1'), subst_exp s f2)
     | LetRecBExp (x, tvs, arg, f1, f2) ->
       LetRecBExp (x, tvs, arg, subst_exp s f1, subst_exp s f2)
 
@@ -795,7 +795,7 @@ module KNorm = struct
       let us = List.map nu_to_fresh tas in
       begin match v1 with
         | FunSV proc -> FunSV (fun _ -> proc (tvs, us))
-        | FunAV proc -> FunAV (fun _ -> proc (tvs, us))
+        | FunDualV proc -> FunDualV (fun _ -> proc (tvs, us))
         | FunBV proc -> FunBV (fun _ -> proc (tvs, us))
         | _ -> raise @@ Eval_bug "AppTy: not fun value"
       end
@@ -819,18 +819,18 @@ module KNorm = struct
           in f ([], []) (v1, v2)
         )
       in eval_exp (Environment.add x v1 kenv) f2
-    | LetRecAExp (x, _, (y, k), (f1, f1'), f2) -> 
+    | LetRecDualExp (x, _, (y, k), (f1, f1'), f2) -> 
       let v1 = 
-        FunAV (
+        FunDualV (
           fun (xs, ys) -> 
           let f1 = subst_exp (Utils.List.zip xs ys) f1 in
           let f1' = subst_exp (Utils.List.zip xs ys) f1' in
           let rec f1_ v =
-            let kenv = Environment.add x (FunAV (fun _ -> (f1_, f1'_))) kenv in
+            let kenv = Environment.add x (FunDualV (fun _ -> (f1_, f1'_))) kenv in
             let kenv = Environment.add y v kenv in
             eval_exp kenv f1
           and f1'_ (v, w) =
-            let kenv = Environment.add x (FunAV (fun _ -> (f1_, f1'_))) kenv in
+            let kenv = Environment.add x (FunDualV (fun _ -> (f1_, f1'_))) kenv in
             let kenv = Environment.add y v kenv in
             let kenv = Environment.add k w kenv in
             eval_exp kenv f1'
@@ -1024,7 +1024,7 @@ module KNorm = struct
     | [] -> raise @@ Eval_bug "Didn't match"
   and eval_app_valD ?(debug=false) kenv v1 v2 v3 = match v1 with
     | FunSV proc -> proc ([], []) (v2, v3)
-    | FunAV proc -> 
+    | FunDualV proc -> 
       begin match v3 with
       | CoercionV (CId _) -> fst (proc ([], [])) v2
       | _ -> snd (proc ([], [])) (v2, v3)
@@ -1038,7 +1038,7 @@ module KNorm = struct
       end
     | _ -> raise @@ Eval_bug "app_valD: application of non procedure value"
   and eval_app_valM ?(debug=false) env v1 v2 = match v1 with (*値まで評価しきっているので，論文のようなlet k = t;;c in ~~とはできない*)
-    | FunAV proc -> fst (proc ([], [])) v2
+    | FunDualV proc -> fst (proc ([], [])) v2
     | FunBV proc -> proc ([], []) v2
     | CoerceV (v1, CFun (s, t)) -> eval_app_valD env v1 (coerce v2 s ~debug:debug) (CoercionV t) ~debug:debug
     | _ -> raise @@ Eval_bug "app_valM: application of non procedure value"
@@ -1063,18 +1063,18 @@ module KNorm = struct
         )
       in let kenv = Environment.add x v kenv in
       kenv, x, v
-    | LetRecADecl (x, _, (y, k), (f1, f1')) -> 
+    | LetRecDualDecl (x, _, (y, k), (f1, f1')) -> 
       let v = 
-        FunAV (
+        FunDualV (
           fun (xs, ys) -> 
           let f1 = subst_exp (Utils.List.zip xs ys) f1 in
           let f1' = subst_exp (Utils.List.zip xs ys) f1' in
           let rec f1_ v =
-            let kenv = Environment.add x (FunAV (fun _ -> (f1_, f1'_))) kenv in
+            let kenv = Environment.add x (FunDualV (fun _ -> (f1_, f1'_))) kenv in
             let kenv = Environment.add y v kenv in
             eval_exp kenv f1
           and f1'_ (v, w) =
-            let kenv = Environment.add x (FunAV (fun _ -> (f1_, f1'_))) kenv in
+            let kenv = Environment.add x (FunDualV (fun _ -> (f1_, f1'_))) kenv in
             let kenv = Environment.add y v kenv in
             let kenv = Environment.add k w kenv in
             eval_exp kenv f1'

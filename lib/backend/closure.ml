@@ -237,7 +237,7 @@ module KNorm = struct
       if V.mem x (Cls.fv_exp f2') then
         Cls.MakeCls (x, { Cls.entry = Cls.to_label x; Cls.actual_fv = zs }, { ftvs = tyvar_to_tyarg tvs; offset = List.length tvs' }, f2')
       else f2'
-    | LetRecAExp _ -> raise @@ Closure_bug "shouldn't apper alt in closure"
+    | LetRecDualExp _ -> raise @@ Closure_bug "shouldn't apper alt in closure"
     | LetRecBExp (x, tvs', y, f1, f2) ->
       let k_fv = V.remove x @@ V.remove y @@ fv_exp f1 in
       let new_tvs = tvs' @ tvs in

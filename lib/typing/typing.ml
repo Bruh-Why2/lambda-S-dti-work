@@ -647,7 +647,7 @@ module CC = struct
       if (TyList u1) = u2 then u2
       else raise @@ Type_bug (asprintf "cons: %a=%a" pp_ty (TyList u1) pp_ty u2)
     | TupleExp es -> TyTuple (List.map (fun e -> type_of_exp env e) es)
-    | FunSExp _ | FixSExp _ | FunAExp _ | FixAExp _ | CoercionExp _ | AppDExp _ | CSeqExp _ -> raise @@ Occur_LS1 "yet"
+    | FunSExp _ | FixSExp _ | FunDualExp _ | FixDualExp _ | CoercionExp _ | AppDExp _ | CSeqExp _ -> raise @@ Occur_LS1 "yet"
   and type_of_ms env u_match = function
     | (mf, f) :: t ->
       let u_match', env' = type_of_matchform env mf in

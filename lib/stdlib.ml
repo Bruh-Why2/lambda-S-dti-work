@@ -62,7 +62,7 @@ module CC = struct
       | _ -> raise @@ Stdlib_bug "untagged value"
       )
     else if config.alt then
-      FunAV (fun _ -> 
+      FunDualV (fun _ -> 
         (function
         | CoerceV (_, CSeq (_, CInj t')) when t = t' -> BoolV true
         | CoerceV _ -> BoolV false
@@ -86,7 +86,7 @@ module CC = struct
       | _ -> raise @@ Stdlib_bug "exit: unexpected value"
       )
     else if config.alt then
-      FunAV (fun _ -> 
+      FunDualV (fun _ -> 
       (function
       | IntV i -> raise @@ Stdlib_exit i
       | _ -> raise @@ Stdlib_bug "exit: unexpected value"),
@@ -107,7 +107,7 @@ module CC = struct
       | _ -> raise @@ Stdlib_bug "print_bool: unexpected value"
       )
     else if config.alt then 
-      FunAV (fun _ -> 
+      FunDualV (fun _ -> 
         (function
         | BoolV b -> 
           print_string @@ string_of_bool b;
@@ -134,7 +134,7 @@ module CC = struct
       | _ -> raise @@ Stdlib_bug "print_int: unexpected value"
       )
     else if config.alt then
-      FunAV (fun _ -> 
+      FunDualV (fun _ -> 
         (function
         | IntV i -> 
           print_int i;
@@ -161,7 +161,7 @@ module CC = struct
       | _ -> raise @@ Stdlib_bug "print_newline: unexpected value"
       )
     else if config.alt then
-      FunAV (fun _ -> 
+      FunDualV (fun _ -> 
         (function
         | UnitV -> 
           print_newline (); 
@@ -188,7 +188,7 @@ module CC = struct
       | _ -> raise @@ Stdlib_bug "read_int: unexpected value"
       )
     else if config.alt then
-      FunAV (fun _ -> 
+      FunDualV (fun _ -> 
         (function
         | UnitV -> 
           let i = read_int () in 
@@ -220,7 +220,7 @@ module KNorm = struct
       | _ -> raise @@ Stdlib_bug "untagged value"
       )
     else if config.alt then
-      FunAV (fun _ -> 
+      FunDualV (fun _ -> 
         (function
         | CoerceV (_, CSeq (_, CInj t')) when t = t' -> IntV 1
         | CoerceV _ -> IntV 0
@@ -244,7 +244,7 @@ module KNorm = struct
       | _ -> raise @@ Stdlib_bug "exit: unexpected value"
       )
     else if config.alt then
-      FunAV (fun _ -> 
+      FunDualV (fun _ -> 
       (function
       | IntV i -> raise @@ Stdlib_exit i
       | _ -> raise @@ Stdlib_bug "exit: unexpected value"),
@@ -266,7 +266,7 @@ module KNorm = struct
       | _ -> raise @@ Stdlib_bug "print_bool: unexpected value"
       )
     else if config.alt then 
-      FunAV (fun _ -> 
+      FunDualV (fun _ -> 
         (function
         | IntV 0 -> 
           print_string "false";
@@ -302,7 +302,7 @@ module KNorm = struct
       | _ -> raise @@ Stdlib_bug "print_int: unexpected value"
       )
     else if config.alt then
-      FunAV (fun _ -> 
+      FunDualV (fun _ -> 
         (function
         | IntV i -> 
           print_int i;
@@ -329,7 +329,7 @@ module KNorm = struct
       | _ -> raise @@ Stdlib_bug "print_newline: unexpected value"
       )
     else if config.alt then
-      FunAV (fun _ -> 
+      FunDualV (fun _ -> 
         (function
         | IntV 0 -> 
           print_newline (); 
@@ -356,7 +356,7 @@ module KNorm = struct
       | _ -> raise @@ Stdlib_bug "print_newline: unexpected value"
       )
     else if config.alt then
-      FunAV (fun _ -> 
+      FunDualV (fun _ -> 
         (function
         | IntV 0 -> 
           let i = read_int () in

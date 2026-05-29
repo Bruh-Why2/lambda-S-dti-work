@@ -388,7 +388,7 @@ module CC = struct
   open Syntax.CC
 
   let gt_exp f1 f2 = match f1, f2 with
-    | (Var _ | IConst _ | BConst _ | UConst | NilExp _ | CoercionExp _ | TupleExp _ | CSeqExp _ | AppMExp _ | AppDExp _ | CAppExp _ | BinOp _ | ConsExp _ | IfExp _ | MatchExp _ | CastExp _), (LetExp _ | FunBExp _ | FixBExp _ | FunSExp _ | FixSExp _ | FunAExp _ | FixAExp _) -> true
+    | (Var _ | IConst _ | BConst _ | UConst | NilExp _ | CoercionExp _ | TupleExp _ | CSeqExp _ | AppMExp _ | AppDExp _ | CAppExp _ | BinOp _ | ConsExp _ | IfExp _ | MatchExp _ | CastExp _), (LetExp _ | FunBExp _ | FixBExp _ | FunSExp _ | FixSExp _ | FunDualExp _ | FixDualExp _) -> true
     | (Var _ | IConst _ | BConst _ | UConst | NilExp _ | CoercionExp _ | TupleExp _ | CSeqExp _ | AppMExp _ | AppDExp _ | CAppExp _ | BinOp _ | ConsExp _ | IfExp _ | MatchExp _), CastExp _ -> true
     | (Var _ | IConst _ | BConst _ | UConst | NilExp _ | CoercionExp _ | TupleExp _ | CSeqExp _ | AppMExp _ | AppDExp _ | CAppExp _ | BinOp _ | ConsExp _ | IfExp _), MatchExp _ -> true
     | (Var _ | IConst _ | BConst _ | UConst | NilExp _ | CoercionExp _ | TupleExp _ | CSeqExp _ | AppMExp _ | AppDExp _ | CAppExp _ | BinOp _ | ConsExp _), IfExp _ -> true
@@ -400,7 +400,7 @@ module CC = struct
     | _ -> false
 
   let gte_exp f1 f2 = match f1, f2 with
-    | (LetExp _ | FunBExp _ | FixBExp _ | FunSExp _ | FixSExp _ | FunAExp _ | FixAExp _), (LetExp _ | FunBExp _ | FixBExp _ | FunSExp _ | FixSExp _ | FunAExp _ | FixAExp _) -> true
+    | (LetExp _ | FunBExp _ | FixBExp _ | FunSExp _ | FixSExp _ | FunDualExp _ | FixDualExp _), (LetExp _ | FunBExp _ | FixBExp _ | FunSExp _ | FixSExp _ | FunDualExp _ | FixDualExp _) -> true
     | IfExp _, IfExp _ -> true
     | BinOp (op1, _, _), BinOp (op2, _, _) when op1 = op2 -> true
     | (AppDExp _ | AppMExp _), (AppDExp _ | AppMExp _) -> true
@@ -462,14 +462,14 @@ module CC = struct
         c
         pp_ty u2
         pp_exp f
-    | FunAExp ((x1, u1), c, (f1, f2)) ->
+    | FunDualExp ((x1, u1), c, (f1, f2)) ->
       fprintf ppf "fun ((%s: %a), %s) -> (%a | %a)"
         x1
         pp_ty u1
         c
         pp_exp f1
         pp_exp f2
-    | FixAExp ((x, y, u1, u2), c, (f1, f2)) ->
+    | FixDualExp ((x, y, u1, u2), c, (f1, f2)) ->
       fprintf ppf "fix %s ((%s: %a), %s): %a = (%a | %a)"
         x
         y
@@ -551,12 +551,12 @@ module CC = struct
   (*let pp_tag ppf t = pp_ty ppf @@ tag_to_ty t*)
 
   let gt_value v1 v2 = match v1, v2 with
-    | (BoolV _ | IntV _ | UnitV | FunBV _ | FunSV _ | FunAV _ | NilV | TupleV _ | CoercionV _ | Tagged _ | CoerceV _), ConsV _ -> true
-    | (BoolV _ | IntV _ | UnitV | FunBV _ | FunSV _ | FunAV _ | NilV | TupleV _ | CoercionV _), (Tagged _ | CoerceV _) -> true
+    | (BoolV _ | IntV _ | UnitV | FunBV _ | FunSV _ | FunDualV _ | NilV | TupleV _ | CoercionV _ | Tagged _ | CoerceV _), ConsV _ -> true
+    | (BoolV _ | IntV _ | UnitV | FunBV _ | FunSV _ | FunDualV _ | NilV | TupleV _ | CoercionV _), (Tagged _ | CoerceV _) -> true
     | _ -> false
 
   let gte_value v1 v2 = match v1, v2 with
-    | (FunBV _ | FunSV _ | FunAV _), (FunBV _ | FunSV _ | FunAV _) -> true
+    | (FunBV _ | FunSV _ | FunDualV _), (FunBV _ | FunSV _ | FunDualV _) -> true
     | Tagged _, Tagged _ -> true
     | CoerceV _, CoerceV _ -> true
     | ConsV _, ConsV _ -> true
@@ -567,7 +567,7 @@ module CC = struct
     | BoolV b -> pp_print_bool ppf b
     | IntV i -> pp_print_int ppf i
     | UnitV -> pp_print_string ppf "()"
-    | FunBV _ | FunSV _ | FunAV _ -> pp_print_string ppf "<fun>"
+    | FunBV _ | FunSV _ | FunDualV _ -> pp_print_string ppf "<fun>"
     | CoerceV (v1, c) as v ->
       fprintf ppf "%a<<%a>>"
         (with_paren (gt_value v v1) pp_value) v1
@@ -594,7 +594,7 @@ module CC = struct
     | BoolV b -> pp_print_bool ppf b
     | IntV i -> pp_print_int ppf i
     | UnitV -> pp_print_string ppf "()"
-    | FunBV _ | FunSV _ | FunAV _ -> pp_print_string ppf "<fun>"
+    | FunBV _ | FunSV _ | FunDualV _ -> pp_print_string ppf "<fun>"
     | CoerceV (v1, c) as v ->
       fprintf ppf "%a<<%a>>"
         (with_paren (gt_value v v1) pp_value2) v1
@@ -624,14 +624,14 @@ module KNorm = struct
   let gt_exp e e1 = match e, e1 with
     | (Var _ | IConst _ | Nil), _ -> raise @@ Syntax_error(* "gt_exp: value-exp was given as e"*)
     | (Add _ | Sub _ | Mul _ | Div _ | Mod _ | Cons _ | Tuple _ | AppDExp _ | AppTy _ | AppMExp _ | Hd _ | Tl _ | Tget _), _ -> raise @@ Syntax_error(* "gt_exp : expression not contain exp was given as e"*)
-    | (IfEqExp _ | IfLteExp _ | MatchExp _), (LetExp _ | LetRecSExp _ | LetRecAExp _ | LetRecBExp _) -> true
+    | (IfEqExp _ | IfLteExp _ | MatchExp _), (LetExp _ | LetRecSExp _ | LetRecDualExp _ | LetRecBExp _) -> true
     | _ -> false
   
   let gte_exp e e1 = match e, e1 with
     (* | Add _, Add _ | Sub _, Sub _ | Mul _, Mul _ | Div _, Div _ | Mod _, Mod _ | Cons _, Cons _ | Tuple _, Tuple _ -> true *)
     (* | AppTy _, AppTy _ | AppDExp _, AppDExp _ | AppMExp _, AppMExp _ -> true *)
     (* | Hd _, Hd _ | Tl _, Tl _ | Tget _, Tget _ -> true *)
-    | (LetExp _ | LetRecSExp _ | LetRecAExp _ | LetRecBExp _) , (LetExp _ | LetRecSExp _ | LetRecAExp _ | LetRecBExp _) -> true
+    | (LetExp _ | LetRecSExp _ | LetRecDualExp _ | LetRecBExp _) , (LetExp _ | LetRecSExp _ | LetRecDualExp _ | LetRecBExp _) -> true
     | (IfEqExp _ | IfLteExp _), (IfEqExp _ | IfLteExp _) -> true
     | MatchExp _, MatchExp _ -> true
     | _ -> gt_exp e e1
@@ -702,7 +702,7 @@ module KNorm = struct
         k
         (with_paren (gt_exp e e1) pp_exp) e1
         pp_exp e2
-    | LetRecAExp (x, tvs, (y, k), (e1, e2), e3) as e ->
+    | LetRecDualExp (x, tvs, (y, k), (e1, e2), e3) as e ->
       fprintf ppf "let %s = %afun (%s, %s) -> (%a | %a) in %a"
         x
         pp_let_tyabses tvs
@@ -739,7 +739,7 @@ module KNorm = struct
           y
           k
           pp_exp e
-    | LetRecADecl (x, tvs, (y, k), (e1, e2)) ->
+    | LetRecDualDecl (x, tvs, (y, k), (e1, e2)) ->
         fprintf ppf "let %s = %afun (%s, %s) -> (%a | %a)"
           x
           pp_let_tyabses tvs
@@ -755,12 +755,12 @@ module KNorm = struct
           pp_exp e
 
   let gt_value v1 v2 = match v1, v2 with
-    | (IntV _ | FunSV _ | FunAV _ | FunBV _ | NilV | TupleV _ | CoercionV _ | CoerceV _), ConsV _ -> true
-    | (IntV _ | FunSV _ | FunAV _ | FunBV _ | NilV | TupleV _ | CoercionV _), CoerceV _ -> true
+    | (IntV _ | FunSV _ | FunDualV _ | FunBV _ | NilV | TupleV _ | CoercionV _ | CoerceV _), ConsV _ -> true
+    | (IntV _ | FunSV _ | FunDualV _ | FunBV _ | NilV | TupleV _ | CoercionV _), CoerceV _ -> true
     | _ -> false
 
   let gte_value v1 v2 = match v1, v2 with
-    | (FunSV _ | FunAV _ | FunBV _), (FunSV _ | FunAV _ | FunBV _) -> true
+    | (FunSV _ | FunDualV _ | FunBV _), (FunSV _ | FunDualV _ | FunBV _) -> true
     | CoerceV _, CoerceV _ -> true
     | ConsV _, ConsV _ -> true
     | TupleV _, TupleV _ -> true
@@ -778,7 +778,7 @@ module KNorm = struct
       let pp_list ppf vals = pp_print_list pp_value ppf vals ~pp_sep:pp_sep in
       fprintf ppf "(%a)"
         pp_list vs
-    | FunSV _ | FunAV _ | FunBV _ -> pp_print_string ppf "<fun>"
+    | FunSV _ | FunDualV _ | FunBV _ -> pp_print_string ppf "<fun>"
     | CoerceV (v1, c) as v -> 
       fprintf ppf "%a<<%a>>"
         (with_paren (gt_value v v1) pp_value) v1
@@ -801,7 +801,7 @@ module KNorm = struct
       let pp_list ppf vals = pp_print_list pp_value2 ppf vals ~pp_sep:pp_sep in
       fprintf ppf "(%a)"
         pp_list vs
-    | FunSV _ | FunAV _ | FunBV _ -> pp_print_string ppf "<fun>"
+    | FunSV _ | FunDualV _ | FunBV _ -> pp_print_string ppf "<fun>"
     | CoerceV (v1, c) as v -> 
       fprintf ppf "%a<<%a>>"
         (with_paren (gt_value v v1) pp_value2) v1

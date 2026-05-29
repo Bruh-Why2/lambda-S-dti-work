@@ -170,7 +170,7 @@ module CC = struct
         TupleExp (List.rev r), env
       in
       iter env es []
-    | FunSExp _ | FixSExp _ | FunAExp _ | FixAExp _ | AppDExp _ | CSeqExp _ -> raise @@ Occur_LS1 "fresh_tv"
+    | FunSExp _ | FixSExp _ | FunDualExp _ | FixDualExp _ | AppDExp _ | CSeqExp _ -> raise @@ Occur_LS1 "fresh_tv"
   and tv_renew_ms ms env = match ms with
     | (mf, e) :: ms ->
       let mf, env = tv_renew_mf mf env in

@@ -310,7 +310,7 @@ module CC = struct
     | ConsExp (f1, f2) -> ConsExp (translate_exp env f1, translate_exp env f2) 
     | TupleExp fs -> TupleExp (List.map (fun f -> translate_exp env f) fs)
     | CastExp _ -> raise @@ Translation_bug "CC.translate cast"
-    | FunSExp _ | FixSExp _ | FunAExp _ | FixAExp _ | CoercionExp _ | AppDExp _ | CSeqExp _ -> raise @@ Occur_LS1 "translate"
+    | FunSExp _ | FixSExp _ | FunDualExp _ | FixDualExp _ | CoercionExp _ | AppDExp _ | CSeqExp _ -> raise @@ Occur_LS1 "translate"
   and translate_exp_k env k = function
     | Var (x, ys) -> CAppExp (Var (x, ys), k)
     | IConst i -> CAppExp (IConst i, k)
@@ -342,7 +342,7 @@ module CC = struct
       CAppExp (ConsExp (translate_exp env f1, translate_exp env f2), k)
     | TupleExp fs -> CAppExp (TupleExp (List.map (fun f -> translate_exp env f) fs), k)
     | CastExp _ -> raise @@ Translation_bug "CC.translate cast"
-    | FunSExp _ | FixSExp _ | FunAExp _ | FixAExp _ | CoercionExp _ | AppDExp _ | CSeqExp _ -> raise @@ Occur_LS1 "translate"
+    | FunSExp _ | FixSExp _ | FunDualExp _ | FixDualExp _ | CoercionExp _ | AppDExp _ | CSeqExp _ -> raise @@ Occur_LS1 "translate"
 
   let translate env = function
     | Exp f -> Exp (translate_exp env f)
@@ -356,11 +356,11 @@ module CC = struct
     | FunBExp ((x, u), f) ->
       let env = Environment.add x (tysc_of_ty u) env in
       let id, k = fresh_CVar () in 
-      FunAExp ((x, u), id, (translate_exp_alt env f, translate_exp_k_alt env k f))
+      FunDualExp ((x, u), id, (translate_exp_alt env f, translate_exp_k_alt env k f))
     | FixBExp ((x, y, u1, u), f) -> 
       let env = Environment.add y (tysc_of_ty u1) (Environment.add x (tysc_of_ty (TyFun (u1, u))) env) in
       let id, k = fresh_CVar () in 
-      FixAExp ((x, y, u1, u), id, (translate_exp_alt env f, translate_exp_k_alt env k f))
+      FixDualExp ((x, y, u1, u), id, (translate_exp_alt env f, translate_exp_k_alt env k f))
     | CAppExp (f1, f2) -> translate_exp_k_alt env f2 f1
     | AppMExp (f1, f2) -> (*new*)
       AppMExp (translate_exp_alt env f1, translate_exp_alt env f2)
@@ -377,7 +377,7 @@ module CC = struct
     | ConsExp (f1, f2) -> ConsExp (translate_exp_alt env f1, translate_exp_alt env f2)  
     | TupleExp fs -> TupleExp (List.map (fun f -> translate_exp_alt env f) fs)
     | CastExp _ -> raise @@ Translation_bug "CC.translate cast"
-    | FunSExp _ | FixSExp _ | FunAExp _ | FixAExp _ | CoercionExp _ | AppDExp _ | CSeqExp _ -> raise @@ Occur_LS1 "translate"
+    | FunSExp _ | FixSExp _ | FunDualExp _ | FixDualExp _ | CoercionExp _ | AppDExp _ | CSeqExp _ -> raise @@ Occur_LS1 "translate"
   and translate_exp_k_alt env k = function
     | Var (x, ys) -> CAppExp (Var (x, ys), k)
     | IConst i -> CAppExp (IConst i, k)
@@ -386,11 +386,11 @@ module CC = struct
     | FunBExp ((x, u), f) -> 
       let env = Environment.add x (tysc_of_ty u) env in
       let id, k' = fresh_CVar () in 
-      CAppExp (FunAExp ((x, u), id, (translate_exp_alt env f, translate_exp_k_alt env k' f)), k)
+      CAppExp (FunDualExp ((x, u), id, (translate_exp_alt env f, translate_exp_k_alt env k' f)), k)
     | FixBExp ((x, y, u1, u), f) -> 
       let env = Environment.add y (tysc_of_ty u1) (Environment.add x (tysc_of_ty (TyFun (u1, u))) env) in
       let id, k' = fresh_CVar () in 
-      CAppExp (FixAExp ((x, y, u1, u), id, (translate_exp_alt env f, translate_exp_k_alt env k' f)), k)
+      CAppExp (FixDualExp ((x, y, u1, u), id, (translate_exp_alt env f, translate_exp_k_alt env k' f)), k)
     | BinOp (op, f1, f2) -> CAppExp (BinOp (op, translate_exp_alt env f1, translate_exp_alt env f2), k)
     | IfExp (f1, f2, f3) -> IfExp (translate_exp_alt env f1, translate_exp_k_alt env k f2, translate_exp_k_alt env k f3)
     | AppMExp (f1, f2) -> AppDExp (translate_exp_alt env f1, (translate_exp_alt env f2, k))
@@ -409,7 +409,7 @@ module CC = struct
       CAppExp (ConsExp (translate_exp_alt env f1, translate_exp_alt env f2), k)
     | TupleExp fs -> CAppExp (TupleExp (List.map (fun f -> translate_exp_alt env f) fs), k)
     | CastExp _ -> raise @@ Translation_bug "CC.translate cast"
-    | FunSExp _ | FixSExp _ | FunAExp _ | FixAExp _ | CoercionExp _ | AppDExp _ | CSeqExp _ -> raise @@ Occur_LS1 "translate"
+    | FunSExp _ | FixSExp _ | FunDualExp _ | FixDualExp _ | CoercionExp _ | AppDExp _ | CSeqExp _ -> raise @@ Occur_LS1 "translate"
 
   let translate_alt env = function
     | Exp f -> Exp (translate_exp_alt env f)

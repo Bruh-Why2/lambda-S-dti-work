@@ -302,8 +302,8 @@ module CC = struct
     | FixBExp of (id * id * ty * ty) * exp
     | FunSExp of (id * ty) * id * exp
     | FixSExp of (id * id * ty * ty) * id * exp
-    | FunAExp of (id * ty) * id * (exp * exp)
-    | FixAExp of (id * id * ty * ty) * id * (exp * exp)
+    | FunDualExp of (id * ty) * id * (exp * exp)
+    | FixDualExp of (id * id * ty * ty) * id * (exp * exp)
     | CoercionExp of coercion
     | BinOp of binop * exp * exp
     | IfExp of exp * exp * exp
@@ -347,8 +347,8 @@ module CC = struct
     | FixBExp ((_, _, u1, _), f) -> TV.union (ftv_ty u1) (ftv_exp f)
     | FunSExp ((_, u), _, f) -> TV.union (ftv_ty u) (ftv_exp f)
     | FixSExp ((_, _, u1, _), _, f) -> TV.union (ftv_ty u1) (ftv_exp f)
-    | FunAExp ((_, u), _, (f1, f2)) -> TV.union (ftv_ty u) @@ TV.union (ftv_exp f1) (ftv_exp f2)
-    | FixAExp ((_, _, u1, _), _, (f1, f2)) -> TV.union (ftv_ty u1) @@ TV.union (ftv_exp f1) (ftv_exp f2)
+    | FunDualExp ((_, u), _, (f1, f2)) -> TV.union (ftv_ty u) @@ TV.union (ftv_exp f1) (ftv_exp f2)
+    | FixDualExp ((_, _, u1, _), _, (f1, f2)) -> TV.union (ftv_ty u1) @@ TV.union (ftv_exp f1) (ftv_exp f2)
     | CoercionExp c -> ftv_coercion c
     | BinOp (_, f1, f2) -> TV.union (ftv_exp f1) (ftv_exp f2)
     | IfExp (f1, f2, f3) ->
@@ -376,7 +376,7 @@ module CC = struct
     | UnitV
     | FunBV of ((tyvar list * ty list) -> value -> value)
     | FunSV of ((tyvar list * ty list) -> (value * value) -> value)
-    | FunAV of ((tyvar list * ty list) -> ((value -> value) * ((value * value) -> value)))
+    | FunDualV of ((tyvar list * ty list) -> ((value -> value) * ((value * value) -> value)))
     | CoercionV of coercion
     | NilV
     | ConsV of value * value
@@ -411,9 +411,9 @@ module KNorm = struct
     | MatchExp of id * (matchform * exp) list
     | CoercionExp of coercion
     | LetExp of id * exp * exp
-    | LetRecSExp of id * tyvar list * (id * id) * exp * exp
-    | LetRecAExp of id * tyvar list * (id * id) * (exp * exp) * exp
     | LetRecBExp of id * tyvar list * id * exp * exp
+    | LetRecSExp of id * tyvar list * (id * id) * exp * exp
+    | LetRecDualExp of id * tyvar list * (id * id) * (exp * exp) * exp
 
   let rec fv_exp = function
     | Var x | Hd x | Tl x  | Tget (x, _) -> V.singleton x
@@ -431,16 +431,16 @@ module KNorm = struct
     | CSeqExp (x, y) -> V.of_list [x; y]
     | CoercionExp _ -> V.empty
     | LetExp (x, f1, f2) -> V.union (fv_exp f1) (V.remove x (fv_exp f2))
-    | LetRecSExp (x, _, (y, z), f1, f2) -> V.union (V.remove x @@ V.remove y @@ V.remove z @@ fv_exp f1) (V.remove x @@ fv_exp f2)
-    | LetRecAExp (x, _, (y, z), (f1, _), f2) -> V.union (V.remove x @@ V.remove y @@ V.remove z @@ fv_exp f1) (V.remove x @@ fv_exp f2)
     | LetRecBExp (x, _, y, f1, f2) -> V.union (V.remove x @@ V.remove y @@ fv_exp f1) (V.remove x @@ fv_exp f2)
+    | LetRecSExp (x, _, (y, z), f1, f2) -> V.union (V.remove x @@ V.remove y @@ V.remove z @@ fv_exp f1) (V.remove x @@ fv_exp f2)
+    | LetRecDualExp (x, _, (y, z), (f1, _), f2) -> V.union (V.remove x @@ V.remove y @@ V.remove z @@ fv_exp f1) (V.remove x @@ fv_exp f2)
 
   type program =
     | Exp of exp
     | LetDecl of id * exp
-    | LetRecSDecl of id * tyvar list * (id * id) * exp
-    | LetRecADecl of id * tyvar list * (id * id) * (exp * exp)
     | LetRecBDecl of id * tyvar list * id * exp
+    | LetRecSDecl of id * tyvar list * (id * id) * exp
+    | LetRecDualDecl of id * tyvar list * (id * id) * (exp * exp)
 
   type value =
     | IntV of int
@@ -450,9 +450,9 @@ module KNorm = struct
     | Tagged of tag * value
     | CoerceV of value * coercion
     | CoercionV of coercion
-    | FunSV of ((tyvar list * ty list) -> (value * value) -> value)
-    | FunAV of ((tyvar list * ty list) -> ((value -> value) * ((value * value) -> value)))
     | FunBV of ((tyvar list * ty list) -> value -> value)
+    | FunSV of ((tyvar list * ty list) -> (value * value) -> value)
+    | FunDualV of ((tyvar list * ty list) -> ((value -> value) * ((value * value) -> value)))
 end
 
 module Cls = struct
