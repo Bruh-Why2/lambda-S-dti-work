@@ -66,51 +66,52 @@ module CC = struct
     | BinOp (op, f1, f2) -> BinOp (op, alpha_exp idenv f1, alpha_exp idenv f2)
     | IfExp (f1, f2, f3) ->
       IfExp (alpha_exp idenv f1, alpha_exp idenv f2, alpha_exp idenv f3)
-    | FunBExp ((x, u), f) -> 
+    | FunBExp (tvs, (x, u), f) -> 
       let newx = genvar x in
-      FunBExp ((newx, u), alpha_exp (Environment.add x newx idenv) f)
+      FunBExp (tvs, (newx, u), alpha_exp (Environment.add x newx idenv) f)
     | FixBExp _ -> raise @@ KNormal_error "FixExp should not be alpha_exp's argument"
-    | FunSExp ((x, u), k, f) -> 
+    | FunSExp (tvs, (x, u), k, f) -> 
       let newx = genvar x in
       let newk = genvar k in
-      FunSExp ((newx, u), newk, alpha_exp (Environment.add x newx (Environment.add k newk idenv)) f)
+      FunSExp (tvs, (newx, u), newk, alpha_exp (Environment.add x newx (Environment.add k newk idenv)) f)
     | FixSExp _ -> raise @@ KNormal_error "FixSExp should not be alpha_exp's argument"
-    | FunDualExp ((x, u), k, (f1, f2)) -> 
+    | FunDualExp (tvs, (x, u), k, (f1, f2)) -> 
       let newx = genvar x in
       let newk = genvar k in
       let idenv = Environment.add x newx (Environment.add k newk idenv) in
-      FunDualExp ((newx, u), newk, (alpha_exp idenv f1, alpha_exp idenv f2))
+      FunDualExp (tvs, (newx, u), newk, (alpha_exp idenv f1, alpha_exp idenv f2))
     | FixDualExp _ -> raise @@ KNormal_bug "FixDualExp should not be alpha_exp's argument"
+    | FunTyExp (tvs, f) -> FunTyExp (tvs, alpha_exp idenv f)
     | AppMExp (f1, f2) -> AppMExp (alpha_exp idenv f1, alpha_exp idenv f2)
     | AppDExp (f1, (f2, f3)) -> AppDExp (alpha_exp idenv f1, (alpha_exp idenv f2, alpha_exp idenv f3))
     | CastExp (f1, u1, u2, p) ->
       CastExp (alpha_exp idenv f1, u1, u2, p)
     | CAppExp (f1, f2) -> CAppExp (alpha_exp idenv f1, alpha_exp idenv f2)
     | CSeqExp (f1, f2) -> CSeqExp (alpha_exp idenv f1, alpha_exp idenv f2)
-    | LetExp (x, tvs, FixBExp ((x', y, u1, u2), f1), f2) -> 
+    | LetExp (x, FixBExp (tvs, (x', y, u1, u2), f1), f2) -> 
       assert (x = x');
       let newx = genvar x in
       let idenv = Environment.add x newx idenv in
       let newy = genvar y in
-      LetExp (newx, tvs, FixBExp ((newx, newy, u1, u2), alpha_exp (Environment.add y newy idenv) f1), alpha_exp idenv f2)
-    | LetExp (x, tvs, FixSExp ((x', y, u1, u2), k, f1), f2) -> 
+      LetExp (newx, FixBExp (tvs, (newx, newy, u1, u2), alpha_exp (Environment.add y newy idenv) f1), alpha_exp idenv f2)
+    | LetExp (x, FixSExp (tvs, (x', y, u1, u2), k, f1), f2) -> 
       assert (x = x');
       let newx = genvar x in
       let idenv = Environment.add x newx idenv in
       let newy = genvar y in
       let newk = genvar k in
-      LetExp (newx, tvs, FixSExp ((newx, newy, u1, u2), newk, alpha_exp (Environment.add y newy (Environment.add k newk idenv)) f1), alpha_exp idenv f2)
-    | LetExp (x, tvs, FixDualExp ((x', y, u1, u2), k, (f1, f2)), f3) -> 
+      LetExp (newx, FixSExp (tvs, (newx, newy, u1, u2), newk, alpha_exp (Environment.add y newy (Environment.add k newk idenv)) f1), alpha_exp idenv f2)
+    | LetExp (x, FixDualExp (tvs, (x', y, u1, u2), k, (f1, f2)), f3) -> 
       assert (x = x');
       let newx = genvar x in
       let idenv = Environment.add x newx idenv in
       let newy = genvar y in
       let newk = genvar k in
       let idenv' = Environment.add y newy (Environment.add k newk idenv) in
-      LetExp (newx, tvs, FixDualExp ((newx, newy, u1, u2), newk, (alpha_exp idenv' f1, alpha_exp idenv' f2)), alpha_exp idenv f3)
-    | LetExp (x, tvs, f1, f2) -> 
+      LetExp (newx, FixDualExp (tvs, (newx, newy, u1, u2), newk, (alpha_exp idenv' f1, alpha_exp idenv' f2)), alpha_exp idenv f3)
+    | LetExp (x, f1, f2) -> 
       let newx = genvar x in
-      LetExp (newx, tvs, alpha_exp idenv f1, alpha_exp (Environment.add x newx idenv) f2)
+      LetExp (newx, alpha_exp idenv f1, alpha_exp (Environment.add x newx idenv) f2)
     | CoercionExp c -> CoercionExp c
     | NilExp u -> NilExp u
     | ConsExp (f1, f2) -> ConsExp (alpha_exp idenv f1, alpha_exp idenv f2)
@@ -121,30 +122,30 @@ module CC = struct
 
   let alpha_program idenv = function
     | Exp f -> Exp (alpha_exp idenv f), idenv
-    | LetDecl (x, tvs, FixBExp ((x', y, u1, u2), f)) ->
+    | LetDecl (x, FixBExp (tvs, (x', y, u1, u2), f)) ->
       assert (x = x');
       let newx = genvar x in
       let idenv = Environment.add x newx idenv in
       let newy = genvar y in
-      LetDecl (newx, tvs, FixBExp ((newx, newy, u1, u2), alpha_exp (Environment.add y newy idenv) f)), idenv
-    | LetDecl (x, tvs, FixSExp ((x', y, u1, u2), k, f)) ->
+      LetDecl (newx, FixBExp (tvs, (newx, newy, u1, u2), alpha_exp (Environment.add y newy idenv) f)), idenv
+    | LetDecl (x, FixSExp (tvs, (x', y, u1, u2), k, f)) ->
       assert (x = x');
       let newx = genvar x in
       let idenv = Environment.add x newx idenv in
       let newy = genvar y in
       let newk = genvar k in
-      LetDecl (newx, tvs, FixSExp ((newx, newy, u1, u2), newk, alpha_exp (Environment.add y newy (Environment.add k newk idenv)) f)), idenv
-    | LetDecl (x, tvs, FixDualExp ((x', y, u1, u2), k, (f1, f2))) ->
+      LetDecl (newx, FixSExp (tvs, (newx, newy, u1, u2), newk, alpha_exp (Environment.add y newy (Environment.add k newk idenv)) f)), idenv
+    | LetDecl (x, FixDualExp (tvs, (x', y, u1, u2), k, (f1, f2))) ->
       assert (x = x');
       let newx = genvar x in
       let idenv = Environment.add x newx idenv in
       let newy = genvar y in
       let newk = genvar k in
       let idenv' = Environment.add y newy (Environment.add k newk idenv) in
-      LetDecl (newx, tvs, FixDualExp ((newx, newy, u1, u2), newk, (alpha_exp idenv' f1, alpha_exp idenv' f2))), idenv
-    | LetDecl (x, tvs, f) -> 
+      LetDecl (newx, FixDualExp (tvs, (newx, newy, u1, u2), newk, (alpha_exp idenv' f1, alpha_exp idenv' f2))), idenv
+    | LetDecl (x, f) -> 
       let newx = genvar x in
-      LetDecl (newx, tvs, alpha_exp idenv f), Environment.add x newx idenv
+      LetDecl (newx, alpha_exp idenv f), Environment.add x newx idenv
 
   let insert_let f (k: id -> KNorm.exp) = match f with
     | KNorm.Var x -> k x
@@ -207,23 +208,26 @@ module CC = struct
         | Var _ | BConst _ | IfExp _ | AppMExp _ | AppDExp _ | LetExp _ | CastExp _ | CAppExp _ | MatchExp _ as f ->
           let f = k_normalize_exp tvsenv f in 
           insert_let f @@ fun x -> insert_let (KNorm.IConst 1) @@ fun y -> IfEqExp (x, y, f2', f3')
-        | IConst _ | UConst | FunBExp _ | FixBExp _ | FunSExp _ | FixSExp _ | FunDualExp _ | FixDualExp _ | CSeqExp _ | CoercionExp _ | NilExp _ | ConsExp _ | TupleExp _ -> raise @@ KNormal_bug "if-cond type should bool"
+        | IConst _ | UConst | FunBExp _ | FixBExp _ | FunSExp _ | FixSExp _ | FunDualExp _ | FixDualExp _ | FunTyExp _ | CSeqExp _ | CoercionExp _ | NilExp _ | ConsExp _ | TupleExp _ -> raise @@ KNormal_bug "if-cond type should bool"
       end
-    | FunBExp ((x, _), f) -> 
+    | FunBExp (tvs, (x, _), f) -> 
+      assert (tvs = []);
       let tent_var = genvar "_var" in
       let f = k_normalize_exp (Environment.add x [] tvsenv) f in
-      KNorm.LetRecBExp (tent_var, [], x, f, KNorm.Var tent_var)
+      KNorm.LetFunExp (tent_var, tvs, FunB (x, f), KNorm.Var tent_var)
     | FixBExp _ -> raise @@ KNormal_bug "FixExp should appear in let"
-    | FunSExp ((x, _), k, f) -> 
+    | FunSExp (tvs, (x, _), k, f) -> 
+      assert (tvs = []);
       let tent_var = genvar "_var" in
       let f = k_normalize_exp (Environment.add x [] @@ Environment.add k [] tvsenv) f in
-      KNorm.LetRecSExp (tent_var, [], (x, k), f, KNorm.Var tent_var)
+      KNorm.LetFunExp (tent_var, tvs, FunS ((x, k), f), KNorm.Var tent_var)
     | FixSExp _ -> raise @@ KNormal_bug "FixSExp should appear in let"
-    | FunDualExp ((x, _), k, (f1, f2)) ->
+    | FunDualExp (tvs, (x, _), k, (f1, f2)) ->
+      assert (tvs = []);
       let tent_var = genvar "_var" in
       let f1 = k_normalize_exp (Environment.add x [] tvsenv) f1 in
       let f2 = k_normalize_exp (Environment.add x [] @@ Environment.add k [] tvsenv) f2 in
-      KNorm.LetRecDualExp (tent_var, [], (x, k), (f1, f2), KNorm.Var tent_var)
+      KNorm.LetFunExp (tent_var, tvs, FunDual ((x, k), (f1, f2)), KNorm.Var tent_var)
     | FixDualExp _ -> raise @@ KNormal_bug "FixDualExp should appear in let"
     | AppMExp (f1, f2) ->
       let f1 = k_normalize_exp tvsenv f1 in 
@@ -264,72 +268,81 @@ module CC = struct
       | [] -> KNorm.Tuple (List.rev l)
       in
       make_tuple fs []
-    | LetExp (x, tvs, f1, f2) -> 
+    | LetExp (x, f1, f2) -> 
       begin match f1 with
-        | FunBExp ((x', _), f1) ->
-          let f1 = k_normalize_exp (Environment.add x' [] tvsenv) f1 in
+        | FunBExp (tvs, (y, _), f1) ->
+          let f1 = k_normalize_exp (Environment.add y [] tvsenv) f1 in
           let f2 = k_normalize_exp (Environment.add x tvs tvsenv) f2 in
-          KNorm.LetRecBExp (x, (if static then [] else tvs), x', f1, f2)
-        | FixBExp ((x', y, _, _), f1) ->
+          KNorm.LetFunExp (x, (if static then [] else tvs), FunB (y, f1), f2)
+        | FixBExp (tvs, (x', y, _, _), f1) ->
           assert (x' = x);
           let f1 = k_normalize_exp (Environment.add y [] (Environment.add x' [] tvsenv)) f1 in
           let f2 = k_normalize_exp (Environment.add x tvs tvsenv) f2 in
-          KNorm.LetRecBExp (x, (if static then [] else tvs), y, f1, f2)
-        | FunSExp ((y, _), k, f1) ->
+          KNorm.LetFunExp (x, (if static then [] else tvs), FunB (y, f1), f2)
+        | FunSExp (tvs, (y, _), k, f1) ->
           let f1 = k_normalize_exp (Environment.add y [] @@ Environment.add k [] tvsenv) f1 in
           let f2 = k_normalize_exp (Environment.add x tvs tvsenv) f2 in
-          KNorm.LetRecSExp (x, tvs, (y, k), f1, f2)
-        | FixSExp ((x', y, _, _), k, f1) ->
+          KNorm.LetFunExp (x, tvs, FunS ((y, k), f1), f2)
+        | FixSExp (tvs, (x', y, _, _), k, f1) ->
           assert (x' = x);
           let f1 = k_normalize_exp (Environment.add y [] @@ Environment.add x' [] @@ Environment.add k [] tvsenv) f1 in
           let f2 = k_normalize_exp (Environment.add x tvs tvsenv) f2 in
-          KNorm.LetRecSExp (x, tvs, (y, k), f1, f2)
-        | FunDualExp ((y, _), k, (f1, f1')) ->
+          KNorm.LetFunExp (x, tvs, FunS ((y, k), f1), f2)
+        | FunDualExp (tvs, (y, _), k, (f1, f1')) ->
           let f1 = k_normalize_exp (Environment.add y [] tvsenv) f1 in
           let f1' = k_normalize_exp (Environment.add y [] @@ Environment.add k [] tvsenv) f1' in
           let f2 = k_normalize_exp (Environment.add x tvs tvsenv) f2 in
-          KNorm.LetRecDualExp (x, tvs, (y, k), (f1, f1'), f2)
-        | FixDualExp ((x', y, _, _), k, (f1, f1')) ->
+          KNorm.LetFunExp (x, tvs, FunDual ((y, k), (f1, f1')), f2)
+        | FixDualExp (tvs, (x', y, _, _), k, (f1, f1')) ->
           assert (x' = x);
           let f1 = k_normalize_exp (Environment.add y [] @@ Environment.add x' [] tvsenv) f1 in
           let f1' = k_normalize_exp (Environment.add y [] @@ Environment.add x' [] @@ Environment.add k [] tvsenv) f1' in
           let f2 = k_normalize_exp (Environment.add x tvs tvsenv) f2 in
-          KNorm.LetRecDualExp (x, tvs, (y, k), (f1, f1'), f2)
+          KNorm.LetFunExp (x, tvs, FunDual ((y, k), (f1, f1')), f2)
+        | FunTyExp (tvs, f1) ->
+          let f1 = k_normalize_exp tvsenv f1 in
+          let f2 = k_normalize_exp (Environment.add x tvs tvsenv) f2 in
+          KNorm.LetFunExp (x, tvs, FunTy f1, f2)
         | f ->
           let f1 = k_normalize_exp tvsenv f in
-          let f2 = k_normalize_exp (Environment.add x tvs tvsenv) f2 in
+          let f2 = k_normalize_exp (Environment.add x [] tvsenv) f2 in
           KNorm.LetExp (x, f1, f2)
       end
+    | _ -> raise @@ KNormal_bug "yet"
 
   let k_normalize_program tvsenv ~static = function
     | Exp f -> let f = k_normalize_exp tvsenv f ~static in KNorm.Exp f, tvsenv
-    | LetDecl (x, tvs, f) -> 
+    | LetDecl (x, f) -> 
       begin match f with
-        | FunBExp ((x', _), f) ->
+        | FunBExp (tvs, (x', _), f) ->
           let f = k_normalize_exp (Environment.add x' [] tvsenv) f ~static in
-          KNorm.LetRecBDecl (x, (if static then [] else tvs), x', f), Environment.add x tvs tvsenv
-        | FixBExp ((x', y, _, _), f) ->
+          KNorm.LetFunDecl (x, (if static then [] else tvs), FunB (x', f)), Environment.add x tvs tvsenv
+        | FixBExp (tvs, (x', y, _, _), f) ->
           assert (x' = x);
           let f = k_normalize_exp (Environment.add y [] (Environment.add x' [] tvsenv)) f ~static in
-          KNorm.LetRecBDecl (x, (if static then [] else tvs), y, f), Environment.add x tvs tvsenv
-        | FunSExp ((x', _), k, f) ->
+          KNorm.LetFunDecl (x, (if static then [] else tvs), FunB (y, f)), Environment.add x tvs tvsenv
+        | FunSExp (tvs, (x', _), k, f) ->
           let f = k_normalize_exp (Environment.add x' [] @@ Environment.add k [] tvsenv) f ~static in
-          KNorm.LetRecSDecl (x, tvs, (x', k), f), Environment.add x tvs tvsenv
-        | FixSExp ((x', y, _, _), k, f) ->
+          KNorm.LetFunDecl (x, tvs, FunS ((x', k), f)), Environment.add x tvs tvsenv
+        | FixSExp (tvs, (x', y, _, _), k, f) ->
           assert (x' = x);
           let f = k_normalize_exp (Environment.add y [] @@ Environment.add x' [] @@ Environment.add k [] tvsenv) f ~static in
-          KNorm.LetRecSDecl (x, tvs, (y, k), f), Environment.add x tvs tvsenv
-        | FunDualExp ((x', _), k, (f1, f2)) ->
+          KNorm.LetFunDecl (x, tvs, FunS ((y, k), f)), Environment.add x tvs tvsenv
+        | FunDualExp (tvs, (x', _), k, (f1, f2)) ->
           let f1 = k_normalize_exp (Environment.add x' [] tvsenv) f1 ~static in
           let f2 = k_normalize_exp (Environment.add x' [] @@ Environment.add k [] tvsenv) f2 ~static in
-          KNorm.LetRecDualDecl (x, tvs, (x', k), (f1, f2)), Environment.add x tvs tvsenv
-        | FixDualExp ((x', y, _, _), k, (f1, f2)) ->
+          KNorm.LetFunDecl (x, tvs, FunDual ((x', k), (f1, f2))), Environment.add x tvs tvsenv
+        | FixDualExp (tvs, (x', y, _, _), k, (f1, f2)) ->
           assert (x' = x);
           let f1 = k_normalize_exp (Environment.add y [] @@ Environment.add x' [] tvsenv) f1 ~static in
           let f2 = k_normalize_exp (Environment.add y [] @@ Environment.add x' [] @@ Environment.add k [] tvsenv) f2 ~static in
-          KNorm.LetRecDualDecl (x, tvs, (y, k), (f1, f2)), Environment.add x tvs tvsenv
+          KNorm.LetFunDecl (x, tvs, FunDual ((y, k), (f1, f2))), Environment.add x tvs tvsenv
+        | FunTyExp (tvs, f) ->
+          let f = k_normalize_exp tvsenv f ~static in
+          KNorm.LetFunDecl (x, tvs, FunTy f), Environment.add x tvs tvsenv
         | _ as f ->
-          let f = k_normalize_exp tvsenv f ~static in KNorm.LetDecl (x, f), Environment.add x tvs tvsenv
+          let f = k_normalize_exp tvsenv f ~static in
+          KNorm.LetDecl (x, f), Environment.add x [] tvsenv
       end
 end
 
@@ -371,14 +384,15 @@ module KNorm = struct
         | Var x' -> beta_exp (Environment.add x x' idenv) f2
         | f1 -> LetExp (x, f1, beta_exp idenv f2)
       end
-    | LetRecSExp (x, tvs, arg, f1, f2) ->
-      LetRecSExp (x, tvs, arg, beta_exp idenv f1, beta_exp idenv f2)
     | CoercionExp _ as f -> f
     | AppMExp (x, y) -> AppMExp (find x idenv, find y idenv)
-    | LetRecDualExp (x, tvs, arg, (f1, f1'), f2) ->
-      LetRecDualExp (x, tvs, arg, (beta_exp idenv f1, beta_exp idenv f1'), beta_exp idenv f2)
-    | LetRecBExp (x, tvs, arg, f1, f2) ->
-      LetRecBExp (x, tvs, arg, beta_exp idenv f1, beta_exp idenv f2)
+    | LetFunExp (x, tvs, fd, f) ->
+      LetFunExp (x, tvs, beta_fd idenv fd, beta_exp idenv f)
+  and beta_fd idenv = function
+    | FunB (arg, f) -> FunB (arg, beta_exp idenv f)
+    | FunS (arg, f) -> FunS (arg, beta_exp idenv f)
+    | FunDual (arg, (f, f')) -> FunDual (arg, (beta_exp idenv f, beta_exp idenv f'))
+    | FunTy f -> FunTy (beta_exp idenv f)
 
   let beta_program idenv = function
     | Exp f -> Exp (beta_exp idenv f), idenv
@@ -388,12 +402,8 @@ module KNorm = struct
       | Var x' as f -> Exp f, Environment.add x x' idenv
       | f -> LetDecl (x, f), idenv
       end
-    | LetRecSDecl (x, tvs, arg, f) ->
-      LetRecSDecl (x, tvs, arg, beta_exp idenv f), idenv
-    | LetRecDualDecl (x, tvs, arg, (f1, f2)) ->
-      LetRecDualDecl (x, tvs, arg, (beta_exp idenv f1, beta_exp idenv f2)), idenv
-    | LetRecBDecl (x, tvs, arg, f) ->
-      LetRecBDecl (x, tvs, arg, beta_exp idenv f), idenv
+    | LetFunDecl (x, tvs, fd) ->
+      LetFunDecl (x, tvs, beta_fd idenv fd), idenv 
 
   (* assoc : let x = (let y = ... in ... ) in ...というようなネストされたletをlet y = ... in let x = ... in ...という形に平たくする *)
   let rec assoc_exp = function
@@ -403,25 +413,22 @@ module KNorm = struct
     | LetExp (x, f1, f2) ->
       let rec insert = function
         | LetExp (x', f3, f4) -> LetExp (x', f3, insert f4)
-        | LetRecSExp (x', tvs, arg, f3, f4) -> LetRecSExp (x', tvs, arg, f3, insert f4)
-        | LetRecDualExp (x', tvs, arg, (f3, f3'), f4) -> LetRecDualExp (x', tvs, arg, (f3, f3'), insert f4)
-        | LetRecBExp (x', tvs, arg, f3, f4) -> LetRecBExp (x', tvs, arg, f3, insert f4)
+        | LetFunExp (x', tvs, fd, f4) -> LetFunExp (x', tvs, fd, insert f4)
         | f1 -> LetExp (x, f1, assoc_exp f2)
       in insert (assoc_exp f1)
-    | LetRecSExp (x, tvs, arg, f1, f2) ->
-      LetRecSExp (x, tvs, arg, assoc_exp f1, assoc_exp f2)
-    | LetRecDualExp (x, tvs, arg, (f1, f1'), f2) ->
-      LetRecDualExp (x, tvs, arg, (assoc_exp f1, assoc_exp f1'), assoc_exp f2)
-    | LetRecBExp (x, tvs, arg, f1, f2) ->
-      LetRecBExp (x, tvs, arg, assoc_exp f1, assoc_exp f2)
+    | LetFunExp (x, tvs, fd, f) ->
+      LetFunExp (x, tvs, assoc_fd fd, assoc_exp f)
     | f -> f
+  and assoc_fd = function
+    | FunB (arg, f) -> FunB (arg, assoc_exp f)
+    | FunS (arg, f) -> FunS (arg, assoc_exp f)
+    | FunDual (arg, (f, f')) -> FunDual (arg, (assoc_exp f, assoc_exp f'))
+    | FunTy f -> FunTy (assoc_exp f)
   
   let assoc_program = function
     | Exp f -> Exp (assoc_exp f)
     | LetDecl (x, f) -> LetDecl (x, assoc_exp f)
-    | LetRecSDecl (x, tvs, arg, f) -> LetRecSDecl (x, tvs, arg, assoc_exp f)
-    | LetRecDualDecl (x, tvs, arg, (f1, f2)) -> LetRecDualDecl (x, tvs, arg, (assoc_exp f1, assoc_exp f2))
-    | LetRecBDecl (x, tvs, arg, f) -> LetRecBDecl (x, tvs, arg, assoc_exp f)
+    | LetFunDecl (x, tvs, fd) -> LetFunDecl (x, tvs, assoc_fd fd)
 end
 
 let kNorm_funs (tvsenv, alphaenv, betaenv) f = 
