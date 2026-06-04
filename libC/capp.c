@@ -251,7 +251,7 @@ value cast(value x, ty *t1, ty *t2, uint32_t rid, uint8_t polarity) {			// input
 						update_longest(cur);
 						#endif
 						#endif
-						return tag_value(x, G_AR); // define x:G=>? as dynamic type value
+						return tag_value(x, G_LI); // define x:G=>? as dynamic type value
 					} else {			// when t1 is list type and t2 is ?
 						// printf("cast ground\n");
 						value x_ = cast(x, t1, &tyli, rid, polarity);									// R_GROUND (x:U=>? -> x:U=>G=>?)
