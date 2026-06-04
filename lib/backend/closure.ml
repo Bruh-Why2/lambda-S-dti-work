@@ -133,7 +133,7 @@ module KNorm = struct
       c
     | _ -> raise @@ Closure_bug "bad coercion"
 
-  let rec toCls_exp known tvs args = function
+  let rec toCls_exp known tvs args funty = function
     | Var x -> Cls.Var x
     | IConst i -> Cls.Int i
     | Add (x, y) -> Cls.Add (x, y)
@@ -147,9 +147,9 @@ module KNorm = struct
     | Hd x -> Cls.Hd x
     | Tl x -> Cls.Tl x
     | Tget (x, i) -> Tget (x, i)
-    | MatchExp (x, ms) -> Cls.Match (x, List.map (fun (mf, f) -> mf, toCls_exp known tvs args f) ms)
-    | IfEqExp (x, y, f1, f2) -> Cls.IfEq (x, y, toCls_exp known tvs args f1, toCls_exp known tvs args f2)
-    | IfLteExp (x, y, f1, f2) -> Cls.IfLte (x, y, toCls_exp known tvs args f1, toCls_exp known tvs args f2)
+    | MatchExp (x, ms) -> Cls.Match (x, List.map (fun (mf, f) -> mf, toCls_exp known tvs args funty f) ms)
+    | IfEqExp (x, y, f1, f2) -> Cls.IfEq (x, y, toCls_exp known tvs args funty f1, toCls_exp known tvs args funty f2)
+    | IfLteExp (x, y, f1, f2) -> Cls.IfLte (x, y, toCls_exp known tvs args funty f1, toCls_exp known tvs args funty f2)
     | AppDExp (x, (y, z)) when V.mem x known -> Cls.AppDDir (Cls.to_label x, (y, z))
     | AppDExp (x, (y, z)) -> Cls.AppDCls (x, (y, z))
     | AppMExp (x, y) when V.mem x known -> Cls.AppMDir (Cls.to_label x, y)
@@ -168,7 +168,8 @@ module KNorm = struct
           if V.mem x known then ([], 0)
           else raise @@ Closure_bug (Format.asprintf "AppTy: environment for %s is not found!" x)
       in *)
-      f (Cls.AppTy (x, List.length zs, outer_tvs_len, us))
+      if V.mem x funty then f (AppTyFun (x, List.length zs, outer_tvs_len, us))
+      else f (Cls.AppTy (x, List.length zs, outer_tvs_len, us))
     | CastExp (x, u1, u2, (r, p)) -> 
       let u1, udeclfun1 = ty_tv tvs u1 in 
       let u2, udeclfun2 = ty_tv tvs u2 in 
@@ -177,7 +178,7 @@ module KNorm = struct
     | CSeqExp (x, y) -> Cls.CSeq (x, y)
     | CoercionExp c -> Cls.Coercion (toCls_crc tvs c)
     | LetExp (x, f1, f2) -> 
-      let f1 = toCls_exp known tvs args f1 in
+      let f1 = toCls_exp known tvs args funty f1 in
       (* let rec get_env args exp = match exp with
         | Cls.Var y | Cls.Cast (y, _, _, _) | Cls.CApp (y, _) -> 
             (try Some (Environment.find y args) with Not_found -> None)
@@ -198,7 +199,7 @@ module KNorm = struct
         | None -> args
       in
       let f2 = toCls_exp known tvs args' f2 in *)
-      let f2 = toCls_exp known tvs args f2 in
+      let f2 = toCls_exp known tvs args funty f2 in
       begin match f1 with
       | Cls.Coercion (Cls.CSeqInj (Cls.CId, (I | B | U as g))) -> CrcManager.register_inj x g
       | Cls.Coercion (Cls.CSeqProj ((I | B | U as g), (rid, p), Cls.CId)) -> CrcManager.register_proj x (g, rid, p)
@@ -207,72 +208,57 @@ module KNorm = struct
       | _ -> ()
       end;
       Cls.Let (x, f1, f2)
-    | LetRecSExp (x, tvs', (y, z), f1, f2) ->
-      let k_fv = V.remove x @@ V.remove y @@ V.remove z @@ fv_exp f1 in
+    | LetFunExp (x, tvs', fd, f2) ->
+      let v_arg, f1 = match fd with
+        | FunB (y, f1) -> V.singleton y, f1
+        | FunS ((y, z), f1) -> V.of_list [y; z], f1
+        | FunDual _ -> raise @@ Closure_bug "shouldn't apper alt in closure"
+        | FunTy f1 -> V.empty, f1
+      in
+      let k_fv = V.remove x @@ V.diff (fv_exp f1) v_arg in
       let new_tvs = tvs' @ tvs in
-      let known', f1' =
+      let known', f1' = (* xはknownな関数かを調べる *)
         if not (V.is_empty k_fv) || List.length new_tvs != 0 then
-          let f1' = toCls_exp known new_tvs args f1 in
+          (* f1の中に自由変数がある、もしくは型引数が空でなければ、xをknownに入れず、f1をknownでclosure変換する *)
+          let f1' = toCls_exp known new_tvs args funty f1 in
           known, f1'
         else 
+          (* 関数xをknownに入れてよいか確かめるため、backupを作成 *)
           let toplevel_backup = !toplevel in
           let static_backup = static_save () in
-          let known' = V.add x known in
-          let f1' = toCls_exp known' new_tvs args f1 in
-          let zs = V.diff (Cls.fv_exp f1') (V.of_list [y; z]) in
+          let known' = V.add x known in (* xをknownに入れてclosure変換してみる *)
+          let f1' = toCls_exp known' new_tvs args funty f1 in
+          let zs = V.diff (Cls.fv_exp f1') v_arg in
           if V.is_empty zs (*&& List.length new_tvs = 0*) then 
+            (* closure変換後のf1に自由変数がなければ、xをknownに入れて返す *)
             known', f1'
           else begin
+            (* closure変換後のf1に自由変数があれば、xをknownに入れず、closure変換をやり直す *)
             toplevel := toplevel_backup; static_restore static_backup;
             (* Format.fprintf Format.err_formatter "backtracking %s\n" x; *)
-            let f1' = toCls_exp known new_tvs args f1 in
+            let f1' = toCls_exp known new_tvs args funty f1 in
             known, f1'
           end
       in
-      let zs = V.elements (V.diff (Cls.fv_exp f1') (V.of_list [x; y; z])) in
+      let zs = V.elements (V.diff (Cls.fv_exp f1') (V.union (V.singleton x) v_arg)) in
       (* let zts = List.map (fun z -> (z, Environment.find z tyenv')) zs in *)
-      let fundef = Cls.FundefD { name = Cls.to_label x; tvs = (new_tvs, List.length tvs'); arg = (y, z); formal_fv = zs; body = f1' } in
-      if not @@ List.mem fundef !toplevel then toplevel := fundef :: !toplevel;
-      let f2' = toCls_exp known' tvs (Environment.add x (zs, List.length tvs) args) f2 in
-      if V.mem x (Cls.fv_exp f2') then
-        Cls.MakeCls (x, { Cls.entry = Cls.to_label x; Cls.actual_fv = zs }, { ftvs = tyvar_to_tyarg tvs; offset = List.length tvs' }, f2')
-      else f2'
-    | LetRecDualExp _ -> raise @@ Closure_bug "shouldn't apper alt in closure"
-    | LetRecBExp (x, tvs', y, f1, f2) ->
-      let k_fv = V.remove x @@ V.remove y @@ fv_exp f1 in
-      let new_tvs = tvs' @ tvs in
-      let known', f1' =
-        if not (V.is_empty k_fv) || List.length new_tvs != 0 then
-          let f1' = toCls_exp known new_tvs args f1 in
-          known, f1'
-        else 
-          let toplevel_backup = !toplevel in
-          let static_backup = static_save () in
-          let known' = V.add x known in
-          let f1' = toCls_exp known' new_tvs args f1 in
-          let zs = V.diff (Cls.fv_exp f1') (V.singleton y) in
-          if V.is_empty zs (*&& List.length new_tvs = 0*) then 
-            known', f1'
-          else begin
-            toplevel := toplevel_backup; static_restore static_backup;
-            (* Format.fprintf Format.err_formatter "backtracking %s\n" x; *)
-            let f1' = toCls_exp known new_tvs args f1 in
-            known, f1'
-          end
+      let fundef, funty = match fd with
+        | FunB (y, _) -> Cls.FundefM { name = Cls.to_label x; tvs = (new_tvs, List.length tvs'); arg = y; formal_fv = zs; body = f1' }, funty
+        | FunS ((y, z), _) -> Cls.FundefD { name = Cls.to_label x; tvs = (new_tvs, List.length tvs'); arg = (y, z); formal_fv = zs; body = f1' }, funty
+        | FunDual _ -> raise @@ Closure_bug "shouldn't apper alt in closure"
+        | FunTy _ -> Cls.FundefTy { name = Cls.to_label x; tvs = (new_tvs, List.length tvs'); formal_fv = zs; body = f1' }, V.add x funty
       in
-      let zs = V.elements (V.diff (Cls.fv_exp f1') (V.of_list [x; y])) in
-      (* let zts = List.map (fun z -> (z, Environment.find z tyenv')) zs in *)
-      let fundef = Cls.FundefM { name = Cls.to_label x; tvs = (new_tvs, List.length tvs'); arg = y; formal_fv = zs; body = f1' } in
       if not @@ List.mem fundef !toplevel then toplevel := fundef :: !toplevel;
-      let f2' = toCls_exp known' tvs (Environment.add x (zs, List.length tvs) args) f2 in
-      if V.mem x (Cls.fv_exp f2') then
-        Cls.MakeCls (x, { Cls.entry = Cls.to_label x; Cls.actual_fv = zs }, { ftvs = tyvar_to_tyarg tvs; offset = List.length tvs' }, f2')
+      let f2' = toCls_exp known' tvs (Environment.add x (zs, List.length tvs) args) funty f2 in
+      if V.mem x (Cls.fv_exp f2') then match fd with
+        | FunTy _ -> Cls.MakeTyCls (x, { Cls.entry = Cls.to_label x; Cls.actual_fv = zs }, { ftvs = tyvar_to_tyarg tvs; offset = List.length tvs' }, f2')
+        | _ -> Cls.MakeCls (x, { Cls.entry = Cls.to_label x; Cls.actual_fv = zs }, { ftvs = tyvar_to_tyarg tvs; offset = List.length tvs' }, f2')
       else f2'
 
   let toCls kf known = 
     let f = match kf with Exp f -> f | _ -> raise @@ Closure_bug "kf is not exp" in
     toplevel := []; static_clear ();
-    toCls_exp known [] Environment.empty f
+    toCls_exp known [] Environment.empty V.empty f
 end
 
 module Cls = struct
@@ -298,6 +284,7 @@ module Cls = struct
     | IfLte (x, y, f1, f2) -> IfLte (replace x, replace y, replace_var vx vy f1, replace_var vx vy f2)
     | Match (x, ms) -> Match (replace x, List.map (fun (mf, f) -> mf, replace_var vx vy f) ms)
     | AppTy (x, k, n, tas) -> AppTy (replace x, k, n, tas)
+    | AppTyFun (x, k, n, tas) -> AppTyFun (replace x, k, n, tas)
     | AppDCls (x, (y, k)) -> AppDCls (replace x, (replace y, replace k))
     | AppDDir (l, (y, k)) -> AppDDir (to_label (replace (to_id l)), (replace y, replace k))
     | CApp (x, k) -> CApp (replace x, replace k)
@@ -305,6 +292,7 @@ module Cls = struct
     | Coercion c -> Coercion c
     | Let (x, f1, f2) -> Let (x, replace_var vx vy f1, replace_var vx vy f2)
     | MakeCls (x, {entry = l; actual_fv = fvs}, ftvs, f) -> MakeCls (x, {entry=to_label (replace (to_id l)); actual_fv = List.map replace fvs}, ftvs, replace_var vx vy f)
+    | MakeTyCls (x, {entry = l; actual_fv = fvs}, ftvs, f) -> MakeTyCls (x, {entry=to_label (replace (to_id l)); actual_fv = List.map replace fvs}, ftvs, replace_var vx vy f)
     | SetTy _ | Insert _ -> raise @@ Closure_bug "SetTy or Insert appear in replace"
     | AppMCls _ | AppMDir _ -> raise @@ Closure_bug "AppM appear in replace"
     | Cast _ -> raise @@ Closure_bug "Cast appear in replace"
@@ -333,6 +321,7 @@ module Cls = struct
     | AppDDir (l, (y, k)) when V.mem k ids -> AppMDir (l, y)
     | CApp (x, k) when V.mem k ids -> Var x
     | MakeCls (x, cls, ftvs, f) -> MakeCls (x, cls, ftvs, to_alt ids f)
+    | MakeTyCls (x, cls, ftvs, f) -> MakeTyCls (x, cls, ftvs, to_alt ids f)
     | AppMCls _ | AppMDir _ -> raise @@ Closure_bug "AppM appear in to_alt"
     | Cast _ -> raise @@ Closure_bug "Cast appear in to_alt"
     | f -> f
@@ -344,6 +333,7 @@ module Cls = struct
         FundefM {name = l; tvs = (tvs, n); arg = y; formal_fv = ids; body = to_alt (V.singleton k) f } ::
         FundefD {name = l; tvs = (tvs, n); arg = (y, k); formal_fv = ids; body = to_alt V.empty f } ::
         (alt_funs t)
+      | FundefTy _ as h -> h :: (alt_funs t)
       | _ -> raise @@ Closure_bug "alt form appear in alt_funs"
       end
     | [] -> []
