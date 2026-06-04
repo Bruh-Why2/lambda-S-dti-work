@@ -215,6 +215,8 @@ let lists = [
   ["let x = [true; false] in x", "[bool]", "true :: false :: []", "true :: false :: []", "1 :: 0 :: []", "1 :: 0 :: []"];
   ["match ([(1, true); (2, false)] : ?) with | [] -> 0 | (x, y) :: t -> x", "int", "1", "1", "1", "1"];
   ["(([1; 2], true : ?) : [int] * bool)", "[int] * bool", "(1 :: 2 :: [], true)", "(1 :: 2 :: [], true)", "(1 :: 2 :: [], 1)", "(1 :: 2 :: [], 1)"];
+  ["let x = [] in let y = 3 :: x in let z = true :: x in y", "[int]", "3 :: []", "3 :: []", "3 :: []", "3 :: []"];
+  ["let x = ([]:?) in let y = 3 :: x in let z = true :: x in y", "[int]","3 :: []", "3 :: []", "3 :: []", "3 :: []"];
 ]
 
 let matches = [
