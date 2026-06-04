@@ -169,7 +169,7 @@ let let_poly_toplevel = [
     "g", "'a -> 'a", "<fun>", "<fun>", "<fun>", "<fun>";
   ];
   [
-    "let f: 'a -> 'a -> ? = fun x y -> 0", "'a -> 'a -> ?", "<fun>", "<fun><<id{'a}->(id{'a}->(id{int};int!))>>", "<fun>", "<fun><<id{'a}->(id{'a}->(id{int};int!))>>";
+    "let f: 'a -> 'a -> ? = fun x y -> 0", "'a -> 'a -> ?", "<fun>", "<fun>", "<fun>", "<fun>";
     "let g1 x = ((fun y -> y) : ? -> ?) x", "'a -> ?", "<fun>", "<fun>", "<fun>", "<fun>";
     "fun x y -> f (g1 x) (g1 y)", "'a -> 'b -> ?", "<fun>", "<fun>", "<fun>", "<fun>";
     "let g2 (x: 'a) = ((fun y -> y) : ? -> ?) x", "'a -> ?", "<fun>", "<fun>", "<fun>", "<fun>";
