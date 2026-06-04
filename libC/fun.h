@@ -6,13 +6,15 @@
 typedef struct fun {
     // 第一引数に 自分自身のクロージャ cls を受け取る
 	// クロージャを生成しないDirの適用であれば、envにはdummyのvalueを入れて対処
-    #if defined(CAST) || defined(STATIC)
-    value (*funcM)(value, value);
-    #elif defined(ALT)
+    #if defined(ALT)
     value (*funcM)(value, value);
     value (*funcD)(value, value, value);
-    #else 
-    value (*funcD)(value, value, value);
+    #else //ALT
+    // 型適用だけをするための関数が常にfuncMを使えるように、STATICやCAST以外のときにもfuncMを定義
+    union {
+        value (*funcM)(value, value);
+        value (*funcD)(value, value, value);
+    };
     #endif
 	
 	// 自由変数や型引数、Wrapであればcoercionや型情報など
