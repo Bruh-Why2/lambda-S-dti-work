@@ -115,7 +115,7 @@ let pp_tyarg ppf = function
   | Ty u -> pp_ty ppf u
   | TyNu -> pp_print_string ppf "ν"
 
-let pp_let_tyabses ppf tyvars =
+let pp_tyabses ppf tyvars =
   if List.length tyvars = 0 then
     fprintf ppf ""
   else
@@ -436,41 +436,47 @@ module CC = struct
         (with_paren (gt_exp f f1) pp_exp) f1
         (with_paren (gt_exp f f2) pp_exp) f2
         (with_paren (gt_exp f f3) pp_exp) f3
-    | FunBExp ((x1, u1), f) ->
-      fprintf ppf "fun (%s: %a) -> %a"
+    | FunBExp (xs, (x1, u1), f) ->
+      fprintf ppf "%afun (%s: %a) -> %a"
+        pp_tyabses xs
         x1
         pp_ty u1
         pp_exp f
-    | FixBExp ((x, y, u1, u2), f) ->
-      fprintf ppf "fix %s (%s: %a): %a = %a"
+    | FixBExp (xs, (x, y, u1, u2), f) ->
+      fprintf ppf "%afix %s (%s: %a): %a = %a"
+        pp_tyabses xs
         x
         y
         pp_ty u1
         pp_ty u2
         pp_exp f
-    | FunSExp ((x1, u1), c, f) ->
-      fprintf ppf "fun ((%s: %a), %s) -> %a"
+    | FunSExp (xs, (x1, u1), c, f) ->
+      fprintf ppf "%afun ((%s: %a), %s) -> %a"
+        pp_tyabses xs
         x1
         pp_ty u1
         c
         pp_exp f
-    | FixSExp ((x, y, u1, u2), c, f) ->
-      fprintf ppf "fix %s ((%s: %a), %s): %a = %a"
+    | FixSExp (xs, (x, y, u1, u2), c, f) ->
+      fprintf ppf "%afix %s ((%s: %a), %s): %a = %a"
+        pp_tyabses xs
         x
         y
         pp_ty u1
         c
         pp_ty u2
         pp_exp f
-    | FunDualExp ((x1, u1), c, (f1, f2)) ->
-      fprintf ppf "fun ((%s: %a), %s) -> (%a | %a)"
+    | FunDualExp (xs, (x1, u1), c, (f1, f2)) ->
+      fprintf ppf "%afun ((%s: %a), %s) -> (%a | %a)"
+        pp_tyabses xs
         x1
         pp_ty u1
         c
         pp_exp f1
         pp_exp f2
-    | FixDualExp ((x, y, u1, u2), c, (f1, f2)) ->
-      fprintf ppf "fix %s ((%s: %a), %s): %a = (%a | %a)"
+    | FixDualExp (xs, (x, y, u1, u2), c, (f1, f2)) ->
+      fprintf ppf "%afix %s ((%s: %a), %s): %a = (%a | %a)"
+        pp_tyabses xs
         x
         y
         pp_ty u1
@@ -478,6 +484,10 @@ module CC = struct
         pp_ty u2
         pp_exp f1
         pp_exp f2
+    | FunTyExp (xs, f) ->
+      fprintf ppf "%a%a"
+        pp_tyabses xs
+        pp_exp f
     | AppMExp (f1, f2) as f ->
       fprintf ppf "%a %a"
         (with_paren (gt_exp f f1) pp_exp) f1
@@ -513,10 +523,9 @@ module CC = struct
       fprintf ppf "match %a with%a"
         (with_paren (gte_exp e e1) pp_exp) e1
         pp_match (ms, e)
-    | LetExp (x, xs, f1, f2) as f ->
-      fprintf ppf "let %s = %a%a in %a"
+    | LetExp (x, f1, f2) as f ->
+      fprintf ppf "let %s = %a in %a"
         x
-        pp_let_tyabses xs
         (with_paren (gt_exp f f1) pp_exp) f1
         pp_exp f2
     | CoercionExp c ->
@@ -542,21 +551,20 @@ module CC = struct
 
   let pp_program ppf = function
     | Exp e -> pp_exp ppf e
-    | LetDecl (x, xs, f) ->
-      fprintf ppf "let %s = %a%a"
+    | LetDecl (x, f) ->
+      fprintf ppf "let %s = %a"
         x
-        pp_let_tyabses xs
         pp_exp f
 
   (*let pp_tag ppf t = pp_ty ppf @@ tag_to_ty t*)
 
   let gt_value v1 v2 = match v1, v2 with
-    | (BoolV _ | IntV _ | UnitV | FunBV _ | FunSV _ | FunDualV _ | NilV | TupleV _ | CoercionV _ | Tagged _ | CoerceV _), ConsV _ -> true
-    | (BoolV _ | IntV _ | UnitV | FunBV _ | FunSV _ | FunDualV _ | NilV | TupleV _ | CoercionV _), (Tagged _ | CoerceV _) -> true
+    | (BoolV _ | IntV _ | UnitV | FunBV _ | FunSV _ | FunDualV _ | FunTyV _ | NilV | TupleV _ | CoercionV _ | Tagged _ | CoerceV _), ConsV _ -> true
+    | (BoolV _ | IntV _ | UnitV | FunBV _ | FunSV _ | FunDualV _ | FunTyV _ | NilV | TupleV _ | CoercionV _), (Tagged _ | CoerceV _) -> true
     | _ -> false
 
   let gte_value v1 v2 = match v1, v2 with
-    | (FunBV _ | FunSV _ | FunDualV _), (FunBV _ | FunSV _ | FunDualV _) -> true
+    | (FunBV _ | FunSV _ | FunDualV _ | FunTyV _ ), (FunBV _ | FunSV _ | FunDualV _ | FunTyV _) -> true
     | Tagged _, Tagged _ -> true
     | CoerceV _, CoerceV _ -> true
     | ConsV _, ConsV _ -> true
@@ -567,7 +575,7 @@ module CC = struct
     | BoolV b -> pp_print_bool ppf b
     | IntV i -> pp_print_int ppf i
     | UnitV -> pp_print_string ppf "()"
-    | FunBV _ | FunSV _ | FunDualV _ -> pp_print_string ppf "<fun>"
+    | FunBV _ | FunSV _ | FunDualV _ | FunTyV _ -> pp_print_string ppf "<fun>"
     | CoerceV (v1, c) as v ->
       fprintf ppf "%a<<%a>>"
         (with_paren (gt_value v v1) pp_value) v1
@@ -594,7 +602,7 @@ module CC = struct
     | BoolV b -> pp_print_bool ppf b
     | IntV i -> pp_print_int ppf i
     | UnitV -> pp_print_string ppf "()"
-    | FunBV _ | FunSV _ | FunDualV _ -> pp_print_string ppf "<fun>"
+    | FunBV _ | FunSV _ | FunDualV _ | FunTyV _ -> pp_print_string ppf "<fun>"
     | CoerceV (v1, c) as v ->
       fprintf ppf "%a<<%a>>"
         (with_paren (gt_value v v1) pp_value2) v1
@@ -624,14 +632,14 @@ module KNorm = struct
   let gt_exp e e1 = match e, e1 with
     | (Var _ | IConst _ | Nil), _ -> raise @@ Syntax_error(* "gt_exp: value-exp was given as e"*)
     | (Add _ | Sub _ | Mul _ | Div _ | Mod _ | Cons _ | Tuple _ | AppDExp _ | AppTy _ | AppMExp _ | Hd _ | Tl _ | Tget _), _ -> raise @@ Syntax_error(* "gt_exp : expression not contain exp was given as e"*)
-    | (IfEqExp _ | IfLteExp _ | MatchExp _), (LetExp _ | LetRecSExp _ | LetRecDualExp _ | LetRecBExp _) -> true
+    | (IfEqExp _ | IfLteExp _ | MatchExp _), (LetExp _ | LetFunExp _) -> true
     | _ -> false
   
   let gte_exp e e1 = match e, e1 with
     (* | Add _, Add _ | Sub _, Sub _ | Mul _, Mul _ | Div _, Div _ | Mod _, Mod _ | Cons _, Cons _ | Tuple _, Tuple _ -> true *)
     (* | AppTy _, AppTy _ | AppDExp _, AppDExp _ | AppMExp _, AppMExp _ -> true *)
     (* | Hd _, Hd _ | Tl _, Tl _ | Tget _, Tget _ -> true *)
-    | (LetExp _ | LetRecSExp _ | LetRecDualExp _ | LetRecBExp _) , (LetExp _ | LetRecSExp _ | LetRecDualExp _ | LetRecBExp _) -> true
+    | (LetExp _ | LetFunExp _) , (LetExp _ | LetFunExp _) -> true
     | (IfEqExp _ | IfLteExp _), (IfEqExp _ | IfLteExp _) -> true
     | MatchExp _, MatchExp _ -> true
     | _ -> gt_exp e e1
@@ -694,30 +702,31 @@ module KNorm = struct
         pp_exp e2
     | CoercionExp c ->
       pp_coercion ppf c
-    | LetRecSExp (x, tvs, (y, k), e1, e2) as e ->
-      fprintf ppf "let %s = %afun (%s, %s) -> %a in %a"
+    | LetFunExp (x, tvs, fd, e2) -> 
+      fprintf ppf "let %s = %a%a in %a"
         x
-        pp_let_tyabses tvs
+        pp_tyabses tvs
+        pp_fd fd
+        pp_exp e2
+  and pp_fd ppf = function
+    | FunB (y, e1) -> 
+      fprintf ppf "fun %s -> %a"
+        y
+        pp_exp e1
+    | FunS ((y, k), e1) ->
+      fprintf ppf "fun (%s, %s) -> %a"
         y
         k
-        (with_paren (gt_exp e e1) pp_exp) e1
-        pp_exp e2
-    | LetRecDualExp (x, tvs, (y, k), (e1, e2), e3) as e ->
-      fprintf ppf "let %s = %afun (%s, %s) -> (%a | %a) in %a"
-        x
-        pp_let_tyabses tvs
+        pp_exp e1
+    | FunDual ((y, k), (e1, e2)) ->
+      fprintf ppf "fun (%s, %s) -> (%a | %a)"
         y
         k
-        (with_paren (gt_exp e e1) pp_exp) e1
-        (with_paren (gt_exp e e2) pp_exp) e2
-        pp_exp e3
-    | LetRecBExp (x, tvs, y, e1, e2) as e ->
-      fprintf ppf "let %s = %afun %s -> %a in %a"
-        x
-        pp_let_tyabses tvs
-        y
-        (with_paren (gt_exp e e1) pp_exp) e1
+        pp_exp e1
         pp_exp e2
+    | FunTy e1 ->
+      fprintf ppf "%a"
+        pp_exp e1
   and pp_match ppf = function
     | ((mf, e1) :: m, e) -> 
       fprintf ppf " | %a -> %a%a"
@@ -732,27 +741,11 @@ module KNorm = struct
       fprintf ppf "let %s = %a"
         x
         pp_exp e
-    | LetRecSDecl (x, tvs, (y, k), e) ->
-        fprintf ppf "let %s = %afun (%s, %s) -> %a"
+    | LetFunDecl (x, tvs, fd) ->
+        fprintf ppf "let %s = %a%a"
           x
-          pp_let_tyabses tvs
-          y
-          k
-          pp_exp e
-    | LetRecDualDecl (x, tvs, (y, k), (e1, e2)) ->
-        fprintf ppf "let %s = %afun (%s, %s) -> (%a | %a)"
-          x
-          pp_let_tyabses tvs
-          y
-          k
-          pp_exp e1
-          pp_exp e2
-    | LetRecBDecl (x, tvs, y, e) ->
-        fprintf ppf "let %s = %afun %s -> %a"
-          x
-          pp_let_tyabses tvs
-          y
-          pp_exp e
+          pp_tyabses tvs
+          pp_fd fd
 
   let gt_value v1 v2 = match v1, v2 with
     | (IntV _ | FunSV _ | FunDualV _ | FunBV _ | NilV | TupleV _ | CoercionV _ | CoerceV _), ConsV _ -> true
@@ -760,7 +753,7 @@ module KNorm = struct
     | _ -> false
 
   let gte_value v1 v2 = match v1, v2 with
-    | (FunSV _ | FunDualV _ | FunBV _), (FunSV _ | FunDualV _ | FunBV _) -> true
+    | (FunSV _ | FunDualV _ | FunBV _ | FunTyV _), (FunSV _ | FunDualV _ | FunBV _ | FunTyV _) -> true
     | CoerceV _, CoerceV _ -> true
     | ConsV _, ConsV _ -> true
     | TupleV _, TupleV _ -> true
@@ -778,7 +771,7 @@ module KNorm = struct
       let pp_list ppf vals = pp_print_list pp_value ppf vals ~pp_sep:pp_sep in
       fprintf ppf "(%a)"
         pp_list vs
-    | FunSV _ | FunDualV _ | FunBV _ -> pp_print_string ppf "<fun>"
+    | FunSV _ | FunDualV _ | FunBV _ | FunTyV _ -> pp_print_string ppf "<fun>"
     | CoerceV (v1, c) as v -> 
       fprintf ppf "%a<<%a>>"
         (with_paren (gt_value v v1) pp_value) v1
@@ -801,7 +794,7 @@ module KNorm = struct
       let pp_list ppf vals = pp_print_list pp_value2 ppf vals ~pp_sep:pp_sep in
       fprintf ppf "(%a)"
         pp_list vs
-    | FunSV _ | FunDualV _ | FunBV _ -> pp_print_string ppf "<fun>"
+    | FunSV _ | FunDualV _ | FunBV _ | FunTyV _ -> pp_print_string ppf "<fun>"
     | CoerceV (v1, c) as v -> 
       fprintf ppf "%a<<%a>>"
         (with_paren (gt_value v v1) pp_value2) v1
@@ -843,7 +836,7 @@ module Cls = struct
       fprintf ppf "%a"
         pp_list cs
 
-  let pp_let_tyabses ppf tyvars =
+  let pp_tyabses ppf tyvars =
     if List.length tyvars = 0 then
       fprintf ppf ""
     else
@@ -898,7 +891,7 @@ module Cls = struct
     | AppDDir (l, (y, z)) -> fprintf ppf "%s:label (%s, %s)" l y z
     | AppMCls (x, y) -> fprintf ppf "%s:cls_alt %s" x y
     | AppMDir (l, y) -> fprintf ppf "%s:label_alt %s" l y
-    | AppTy (x, _, _, tas) ->
+    | AppTy (x, _, _, tas) | AppTyFun (x, _, _, tas) ->
       fprintf ppf "%s[%a]"
         x
         pp_print_tas tas
@@ -942,6 +935,11 @@ module Cls = struct
         x
         pp_print_cls cls
         pp_exp f
+    | MakeTyCls (x, cls, _, f) ->
+      fprintf ppf "tcls %s = %a in %a"
+        x
+        pp_print_cls cls
+        pp_exp f
     | Let (x, f1, f2) ->
         fprintf ppf "let %s = %a in %a"
           x
@@ -971,14 +969,14 @@ module Cls = struct
     if List.length fvl = 0 then
       fprintf ppf "let rec %s %a(%s, %s) = %a"
         l
-        pp_let_tyabses tvs
+        pp_tyabses tvs
         y
         z
         pp_exp f
     else
       fprintf ppf "let rec %s %a(%s, %s) = %a (fv:%a)"
         l
-        pp_let_tyabses tvs
+        pp_tyabses tvs
         y
         z
         pp_exp f
@@ -987,17 +985,28 @@ module Cls = struct
     if List.length fvl = 0 then
       fprintf ppf "let rec %s %a%s = %a"
         l
-        pp_let_tyabses tvs
+        pp_tyabses tvs
         y
         pp_exp f
     else
       fprintf ppf "let rec %s %a%s = %a (fv:%a)"
         l
-        pp_let_tyabses tvs
+        pp_tyabses tvs
         y
         pp_exp f
         pp_print_fv fvl
-
+  | FundefTy { name = l; tvs = (tvs, _); formal_fv = fvl; body = f} ->
+    if List.length fvl = 0 then
+      fprintf ppf "let %s %a= %a"
+        l
+        pp_tyabses tvs
+        pp_exp f
+    else
+      fprintf ppf "let %s %a= %a (fv:%a)"
+        l
+        pp_tyabses tvs
+        pp_exp f
+        pp_print_fv fvl
   let pp_toplevel ppf toplevel =
     let pp_sep ppf () = fprintf ppf "\n" in
     let pp_list ppf defs = pp_print_list pp_fundef ppf defs ~pp_sep:pp_sep in
