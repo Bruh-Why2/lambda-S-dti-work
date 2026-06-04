@@ -298,18 +298,19 @@ module CC = struct
     | IConst of int
     | BConst of bool
     | UConst
-    | FunBExp of (id * ty) * exp
-    | FixBExp of (id * id * ty * ty) * exp
-    | FunSExp of (id * ty) * id * exp
-    | FixSExp of (id * id * ty * ty) * id * exp
-    | FunDualExp of (id * ty) * id * (exp * exp)
-    | FixDualExp of (id * id * ty * ty) * id * (exp * exp)
+    | FunBExp of tyvar list * (id * ty) * exp
+    | FixBExp of tyvar list * (id * id * ty * ty) * exp
+    | FunSExp of tyvar list * (id * ty) * id *  exp
+    | FixSExp of tyvar list * (id * id * ty * ty) * id *  exp
+    | FunDualExp of tyvar list * (id * ty) * id * (exp * exp)
+    | FixDualExp of tyvar list * (id * id * ty * ty) * id * (exp * exp)
+    | FunTyExp of tyvar list * exp
     | CoercionExp of coercion
     | BinOp of binop * exp * exp
     | IfExp of exp * exp * exp
     | AppMExp of exp * exp
     | AppDExp of exp * (exp * exp)
-    | LetExp of id * tyvar list * exp * exp
+    | LetExp of id * exp * exp
     | NilExp of ty
     | ConsExp of exp * exp
     | MatchExp of exp * (matchform * exp) list
@@ -343,20 +344,20 @@ module CC = struct
     | IConst _
     | BConst _
     | UConst -> TV.empty
-    | FunBExp ((_, u), e) -> TV.union (ftv_ty u) (ftv_exp e)
-    | FixBExp ((_, _, u1, _), f) -> TV.union (ftv_ty u1) (ftv_exp f)
-    | FunSExp ((_, u), _, f) -> TV.union (ftv_ty u) (ftv_exp f)
-    | FixSExp ((_, _, u1, _), _, f) -> TV.union (ftv_ty u1) (ftv_exp f)
-    | FunDualExp ((_, u), _, (f1, f2)) -> TV.union (ftv_ty u) @@ TV.union (ftv_exp f1) (ftv_exp f2)
-    | FixDualExp ((_, _, u1, _), _, (f1, f2)) -> TV.union (ftv_ty u1) @@ TV.union (ftv_exp f1) (ftv_exp f2)
+    | FunBExp (tvs, (_, u), f) -> TV.diff (TV.union (ftv_ty u) (ftv_exp f)) (TV.of_list tvs)
+    | FixBExp (tvs, (_, _, u1, _), f) -> TV.diff (TV.union (ftv_ty u1) (ftv_exp f)) (TV.of_list tvs)
+    | FunSExp (tvs, (_, u), _, f) -> TV.diff (TV.union (ftv_ty u) (ftv_exp f)) (TV.of_list tvs)
+    | FixSExp (tvs, (_, _, u1, _), _, f) -> TV.diff (TV.union (ftv_ty u1) (ftv_exp f)) (TV.of_list tvs)
+    | FunDualExp (tvs, (_, u), _, (f1, f2)) -> TV.diff (TV.union (ftv_ty u) @@ TV.union (ftv_exp f1) (ftv_exp f2)) (TV.of_list tvs)
+    | FixDualExp (tvs, (_, _, u1, _), _, (f1, f2)) -> TV.diff (TV.union (ftv_ty u1) @@ TV.union (ftv_exp f1) (ftv_exp f2)) (TV.of_list tvs)
+    | FunTyExp (tvs, f) -> TV.diff (ftv_exp f) (TV.of_list tvs)
     | CoercionExp c -> ftv_coercion c
     | BinOp (_, f1, f2) -> TV.union (ftv_exp f1) (ftv_exp f2)
     | IfExp (f1, f2, f3) ->
       List.fold_right TV.union (List.map ftv_exp [f1; f2; f3]) TV.empty
     | AppMExp (f1, f2) -> TV.union (ftv_exp f1) (ftv_exp f2)
     | AppDExp (f1, (f2, f3)) -> TV.union (ftv_exp f1) (TV.union (ftv_exp f2) (ftv_exp f3))
-    | LetExp (_, xs, f1, f2) ->
-      TV.union (TV.diff (ftv_exp f1) (TV.of_list xs)) (ftv_exp f2)
+    | LetExp (_, f1, f2) -> TV.union (ftv_exp f1) (ftv_exp f2)
     | NilExp _ -> TV.empty
     | ConsExp (f1, f2) -> TV.union (ftv_exp f1) (ftv_exp f2)
     | MatchExp (f, ms) ->
@@ -368,15 +369,16 @@ module CC = struct
 
   type program =
     | Exp of exp
-    | LetDecl of id * tyvar list * exp
+    | LetDecl of id * exp
   
   type value =
     | IntV of int
     | BoolV of bool
     | UnitV
-    | FunBV of ((tyvar list * ty list) -> value -> value)
-    | FunSV of ((tyvar list * ty list) -> (value * value) -> value)
-    | FunDualV of ((tyvar list * ty list) -> ((value -> value) * ((value * value) -> value)))
+    | FunBV of (ty list -> value -> value)
+    | FunSV of (ty list -> (value * value) -> value)
+    | FunDualV of (ty list -> ((value -> value) * ((value * value) -> value)))
+    | FunTyV of (ty list -> value)
     | CoercionV of coercion
     | NilV
     | ConsV of value * value
@@ -411,9 +413,12 @@ module KNorm = struct
     | MatchExp of id * (matchform * exp) list
     | CoercionExp of coercion
     | LetExp of id * exp * exp
-    | LetRecBExp of id * tyvar list * id * exp * exp
-    | LetRecSExp of id * tyvar list * (id * id) * exp * exp
-    | LetRecDualExp of id * tyvar list * (id * id) * (exp * exp) * exp
+    | LetFunExp of id * tyvar list * fundef * exp
+  and fundef =
+    | FunB of id * exp
+    | FunS of (id * id) * exp
+    | FunDual of (id * id) * (exp * exp)
+    | FunTy of exp
 
   let rec fv_exp = function
     | Var x | Hd x | Tl x  | Tget (x, _) -> V.singleton x
@@ -431,16 +436,17 @@ module KNorm = struct
     | CSeqExp (x, y) -> V.of_list [x; y]
     | CoercionExp _ -> V.empty
     | LetExp (x, f1, f2) -> V.union (fv_exp f1) (V.remove x (fv_exp f2))
-    | LetRecBExp (x, _, y, f1, f2) -> V.union (V.remove x @@ V.remove y @@ fv_exp f1) (V.remove x @@ fv_exp f2)
-    | LetRecSExp (x, _, (y, z), f1, f2) -> V.union (V.remove x @@ V.remove y @@ V.remove z @@ fv_exp f1) (V.remove x @@ fv_exp f2)
-    | LetRecDualExp (x, _, (y, z), (f1, _), f2) -> V.union (V.remove x @@ V.remove y @@ V.remove z @@ fv_exp f1) (V.remove x @@ fv_exp f2)
+    | LetFunExp (x, _, fd, f2) -> V.union (V.remove x @@ fv_fd fd) (V.remove x @@ fv_exp f2)
+  and fv_fd = function
+    | FunB (x, f) -> V.remove x @@ fv_exp f
+    | FunS ((x, y), f) -> V.remove x @@ V.remove y @@ fv_exp f
+    | FunDual ((x, y), (f1, f2)) -> V.remove x @@ V.remove y @@ V.union (fv_exp f1) (fv_exp f2)
+    | FunTy f -> fv_exp f
 
   type program =
     | Exp of exp
     | LetDecl of id * exp
-    | LetRecBDecl of id * tyvar list * id * exp
-    | LetRecSDecl of id * tyvar list * (id * id) * exp
-    | LetRecDualDecl of id * tyvar list * (id * id) * (exp * exp)
+    | LetFunDecl of id * tyvar list * fundef
 
   type value =
     | IntV of int
@@ -450,9 +456,10 @@ module KNorm = struct
     | Tagged of tag * value
     | CoerceV of value * coercion
     | CoercionV of coercion
-    | FunBV of ((tyvar list * ty list) -> value -> value)
-    | FunSV of ((tyvar list * ty list) -> (value * value) -> value)
-    | FunDualV of ((tyvar list * ty list) -> ((value -> value) * ((value * value) -> value)))
+    | FunBV of (ty list -> value -> value)
+    | FunSV of (ty list -> (value * value) -> value)
+    | FunDualV of (ty list -> ((value -> value) * ((value * value) -> value)))
+    | FunTyV of (ty list -> value)
 end
 
 module Cls = struct
@@ -464,7 +471,7 @@ module Cls = struct
 
   type closure = { entry : label; actual_fv : id list }
 
-  type ftv = { ftvs : tyarg list; offset : int }
+  type ftv = { ftvs : tyarg list; offset : int } (* offsetはzsとftvsの間にいくつの型変数が入るのか *)
 
   type coercion =
     | CId
@@ -493,7 +500,8 @@ module Cls = struct
     | IfEq of id * id * exp * exp
     | IfLte of id * id * exp * exp
     | Match of id * (matchform * exp) list
-    | AppTy of id * int * int * tyarg list
+    | AppTy of id * int * int * tyarg list (* 1つめのintはidの中身の自由変数の個数、2つめのintはtyarg listには含まれない外側からの型変数の個数 *)
+    | AppTyFun of id * int * int * tyarg list
     | AppDCls of id * (id * id)
     | AppDDir of label * (id * id)
     | AppMCls of id * id
@@ -504,12 +512,14 @@ module Cls = struct
     | Coercion of coercion
     | Let of id * exp * exp
     | MakeCls of id * closure * ftv * exp
+    | MakeTyCls of id * closure * ftv * exp
     | SetTy of tyvar * exp
     | Insert of id * exp
 
   type fundef = 
     | FundefD of { name : label ; tvs : tyvar list * int; arg : id * id; formal_fv : id list; body : exp }
     | FundefM of { name : label ; tvs : tyvar list * int; arg : id; formal_fv : id list; body : exp }
+    | FundefTy of { name : label; tvs : tyvar list * int; formal_fv : id list; body : exp }
 
   let rec fv_exp = function
     | Var x | Hd x | Tl x | Tget (x, _) -> V.singleton x
@@ -520,6 +530,7 @@ module Cls = struct
     | Match (x, ms) -> 
       V.big_union (V.singleton x :: List.map (fun (mf, f) -> V.union (fv_matchform mf) (fv_exp f)) ms)
     | AppTy (x, _, _, _) -> V.singleton x
+    | AppTyFun (x, _, _, _) -> V.singleton x
     | SetTy (_, f) -> fv_exp f
     | AppDDir (_, (y, z)) -> V.of_list [y; z]
     | AppDCls (x, (y, z)) -> V.of_list [x; y; z]
@@ -530,6 +541,7 @@ module Cls = struct
     | CSeq (x, y) -> V.of_list [x; y]
     | Coercion _ -> V.empty
     | MakeCls (x, { entry = _; actual_fv = vs }, _, f) -> V.remove x (V.union (V.of_list vs) (fv_exp f))
+    | MakeTyCls (x, { entry = _; actual_fv = vs }, _, f) -> V.remove x (V.union (V.of_list vs) (fv_exp f))
     | Let (x, c, f) -> V.union (fv_exp c) (V.remove x (fv_exp f))
     | Insert (_, f) -> fv_exp f
 
