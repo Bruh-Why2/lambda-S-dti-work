@@ -289,15 +289,28 @@ module CC = struct
     | UConst as f -> f
     | BinOp (op, f1, f2) -> BinOp (op, subst_exp s f1, subst_exp s f2)
     | IfExp (f1, f2, f3) -> IfExp (subst_exp s f1, subst_exp s f2, subst_exp s f3)
-    | FunBExp ((x1, u1), f) -> FunBExp ((x1, subst_type s u1), subst_exp s f)
-    | FixBExp ((x, y, u1, u2), f) ->
-      FixBExp ((x, y, subst_type s u1, subst_type s u2), subst_exp s f)
-    | FunSExp ((x1, u1), k, f) -> FunSExp ((x1, subst_type s u1), k, subst_exp s f)
-    | FixSExp ((x, y, u1, u2), k, f) ->
-      FixSExp ((x, y, subst_type s u1, subst_type s u2), k, subst_exp s f)
-    | FunDualExp ((x1, u1), k, (f1, f2)) -> FunDualExp ((x1, subst_type s u1), k, (subst_exp s f1, subst_exp s f2))
-    | FixDualExp ((x, y, u1, u2), k, (f1, f2)) ->
-      FixDualExp ((x, y, subst_type s u1, subst_type s u2), k, (subst_exp s f1, subst_exp s f2))
+    | FunBExp (ys, (x1, u1), f) -> 
+      (* Remove substitutions captured by ys *)
+      let s = List.filter (fun (x, _) -> not @@ List.memq x ys) s in
+      FunBExp (ys, (x1, subst_type s u1), subst_exp s f)
+    | FixBExp (ys, (x, y, u1, u2), f) ->
+      let s = List.filter (fun (x, _) -> not @@ List.memq x ys) s in
+      FixBExp (ys, (x, y, subst_type s u1, subst_type s u2), subst_exp s f)
+    | FunSExp (ys, (x1, u1), k, f) ->
+      let s = List.filter (fun (x, _) -> not @@ List.memq x ys) s in
+      FunSExp (ys, (x1, subst_type s u1), k, subst_exp s f)
+    | FixSExp (ys, (x, y, u1, u2), k, f) ->
+      let s = List.filter (fun (x, _) -> not @@ List.memq x ys) s in
+      FixSExp (ys, (x, y, subst_type s u1, subst_type s u2), k, subst_exp s f)
+    | FunDualExp (ys, (x1, u1), k, (f1, f2)) ->
+      let s = List.filter (fun (x, _) -> not @@ List.memq x ys) s in
+      FunDualExp (ys, (x1, subst_type s u1), k, (subst_exp s f1, subst_exp s f2))
+    | FixDualExp (ys, (x, y, u1, u2), k, (f1, f2)) ->
+      let s = List.filter (fun (x, _) -> not @@ List.memq x ys) s in
+      FixDualExp (ys, (x, y, subst_type s u1, subst_type s u2), k, (subst_exp s f1, subst_exp s f2))
+    | FunTyExp (ys, f) ->
+      let s = List.filter (fun (x, _) -> not @@ List.memq x ys) s in
+      FunTyExp (ys, subst_exp s f)
     | NilExp u -> NilExp (subst_type s u)
     | ConsExp (f1, f2) -> ConsExp (subst_exp s f1, subst_exp s f2)
     | TupleExp fs -> TupleExp (List.map (fun f -> subst_exp s f) fs)
@@ -309,10 +322,8 @@ module CC = struct
     | CSeqExp (f1, f2) -> CSeqExp (subst_exp s f1, subst_exp s f2)
     | MatchExp (f, ms) -> 
       MatchExp (subst_exp s f, List.map (fun (mf, f) -> subst_mf s mf, subst_exp s f) ms)
-    | LetExp (y, ys, f1, f2) ->
-      (* Remove substitutions captured by let exp s *)
-      let s = List.filter (fun (x, _) -> not @@ List.memq x ys) s in
-      LetExp (y, ys, subst_exp s f1, subst_exp s f2)
+    | LetExp (y, f1, f2) ->
+      LetExp (y, subst_exp s f1, subst_exp s f2)
 
   let eval_binop op v1 v2 =
     begin match op, v1, v2 with
@@ -330,17 +341,18 @@ module CC = struct
       | _ -> raise @@ Eval_bug "binop: unexpected type of argument"
     end
 
-  let rec eval ?(debug=false) (env: (tyvar list * value) Environment.t) f =
+  let rec eval ?(debug=false) (env: value Environment.t) f =
     if debug then fprintf err_formatter "eval <-- %a@." Pp.CC.pp_exp f;
     let eval = eval ~debug:debug in
     match f with
     | Var (x, us) ->
-      let xs, v = Environment.find x env in
+      let v = Environment.find x env in
       let us = List.map nu_to_fresh us in
       begin match v with
-        | FunBV proc -> FunBV (fun _ -> proc (xs, us))
-        | FunSV proc -> FunSV (fun _ -> proc (xs, us))
-        | FunDualV proc -> FunDualV (fun _ -> proc (xs, us))
+        | FunBV proc -> FunBV (fun _ -> proc us)
+        | FunSV proc -> FunSV (fun _ -> proc us)
+        | FunDualV proc -> FunDualV (fun _ -> proc us)
+        | FunTyV proc -> proc us
         | _ -> v
       end
     | IConst i -> IntV i
@@ -350,56 +362,60 @@ module CC = struct
       let v1 = eval env f1 in
       let v2 = eval env f2 in
       eval_binop op v1 v2
-    | FunBExp ((x, _), f') ->
+    | FunBExp (xs, (x, _), f') ->
       FunBV (
-        fun (xs, ys) -> fun v ->
-          eval (Environment.add x ([], v) env) @@ subst_exp (Utils.List.zip xs ys) f'
+        fun ys -> fun v ->
+          eval (Environment.add x v env) @@ subst_exp (Utils.List.zip xs ys) f'
       )
-    | FixBExp ((x, y, _, _), f') ->
-      let f (xs, ys) v =
+    | FixBExp (xs, (x, y, _, _), f') ->
+      let f ys v =
         let f' = subst_exp (Utils.List.zip xs ys) f' in
         let rec f _ v =
-          let env = Environment.add x (xs, FunBV f) env in
-          let env = Environment.add y ([], v) env in
+          let env = Environment.add x (FunBV f) env in
+          let env = Environment.add y v env in
           eval env f'
-        in f ([], []) v
+        in f [] v
       in FunBV f
-    | FunSExp ((x, _), k, f') ->
+    | FunSExp (xs, (x, _), k, f') ->
       FunSV (
-        fun (xs, ys) -> fun (v, w) ->
-          eval (Environment.add x ([], v) (Environment.add k ([], w) env)) @@ subst_exp (Utils.List.zip xs ys) f'
+        fun ys -> fun (v, w) ->
+          eval (Environment.add x v (Environment.add k w env)) @@ subst_exp (Utils.List.zip xs ys) f'
       )
-    | FixSExp ((x, y, _, _), k, f') ->
-      let f (xs, ys) (v, w) =
+    | FixSExp (xs, (x, y, _, _), k, f') ->
+      let f ys (v, w) =
         let f' = subst_exp (Utils.List.zip xs ys) f' in
         let rec f _ (v, w) =
-          let env = Environment.add x (xs, FunSV f) env in
-          let env = Environment.add y ([], v) env in
-          let env = Environment.add k ([], w) env in
+          let env = Environment.add x (FunSV f) env in
+          let env = Environment.add y v env in
+          let env = Environment.add k w env in
           eval env f'
-        in f ([], []) (v, w)
+        in f [] (v, w)
       in FunSV f
-    | FunDualExp ((x, _), k, (f', f'')) ->
+    | FunDualExp (xs, (x, _), k, (f', f'')) ->
       FunDualV (
-        fun (xs, ys) -> 
-          (fun v -> eval (Environment.add x ([], v) env) @@ subst_exp (Utils.List.zip xs ys) f'),
-          (fun (v, w) -> eval (Environment.add x ([], v) (Environment.add k ([], w) env)) @@ subst_exp (Utils.List.zip xs ys) f'')
+        fun ys -> 
+          (fun v -> eval (Environment.add x v env) @@ subst_exp (Utils.List.zip xs ys) f'),
+          (fun (v, w) -> eval (Environment.add x v (Environment.add k w env)) @@ subst_exp (Utils.List.zip xs ys) f'')
       )
-    | FixDualExp ((x, y, _, _), k, (f', f'')) ->
-      let f (xs, ys) =
+    | FixDualExp (xs, (x, y, _, _), k, (f', f'')) ->
+      let f ys =
         let f' = subst_exp (Utils.List.zip xs ys) f' in
         let f'' = subst_exp (Utils.List.zip xs ys) f'' in
         let rec f1' v =
-          let env = Environment.add x (xs, FunDualV (fun _ -> (f1', f2'))) env in
-          let env = Environment.add y ([], v) env in
+          let env = Environment.add x (FunDualV (fun _ -> (f1', f2'))) env in
+          let env = Environment.add y v env in
           eval env f'
         and f2' (v, w) =
-          let env = Environment.add x (xs, FunDualV (fun _ -> (f1', f2'))) env in
-          let env = Environment.add y ([], v) env in
-          let env = Environment.add k ([], w) env in
+          let env = Environment.add x (FunDualV (fun _ -> (f1', f2'))) env in
+          let env = Environment.add y v env in
+          let env = Environment.add k w env in
           eval env f''
         in (f1', f2')
       in FunDualV f
+    | FunTyExp (xs, f) ->
+      FunTyV (
+        fun ys -> eval env @@ subst_exp (Utils.List.zip xs ys) f
+      )
     | AppMExp (f1, f2) ->
       let v1 = eval env f1 in
       let v2 = eval env f2 in
@@ -416,9 +432,9 @@ module CC = struct
         | BoolV false -> eval env f3
         | _ -> raise @@ Eval_bug "if: non boolean value"
       end
-    | LetExp (x, xs, f1, f2) ->
+    | LetExp (x, f1, f2) ->
       let v1 = eval env f1 in
-      eval (Environment.add x (xs, v1) env) f2
+      eval (Environment.add x v1 env) f2
     | MatchExp (f, ms) ->
       let v = eval env f in
       eval_next ~debug:debug env v ms
@@ -448,7 +464,7 @@ module CC = struct
     | CoercionExp c -> CoercionV c
   and match_mf ?(debug=false) env v mf = match v, mf with
     | _, MatchVar (id, _) ->
-      let env = Environment.add id ([], v) env in
+      let env = Environment.add id v env in
       true, env
     | ConsV (v1, v2), MatchCons (mf1, mf2) ->
       let b1, env = match_mf ~debug:debug env v1 mf1 in
@@ -471,6 +487,8 @@ module CC = struct
     | _, MatchWild _ -> true, env
     | CoerceV (ConsV (v1, v2), CList s), MatchCons _ -> 
       match_mf ~debug:debug env (ConsV (coerce ~debug:debug v1 s, coerce ~debug:debug v2 (CList s))) mf (* lazy *)
+    | CoerceV (TupleV vs, CTuple ss), MatchTuple _ -> 
+      match_mf ~debug:debug env (TupleV (List.map2 (fun v -> fun s -> coerce ~debug:debug v s) vs ss)) mf
     | _ -> false, env 
   and eval_next ?(debug=false) env v ms = match ms with
     | (mf, f) :: ms ->
@@ -516,11 +534,10 @@ module CC = struct
       else begin match v with
       | FunBV proc ->
         FunBV (
-          fun (xs, ys) x ->
-            let subst = subst_type @@ Utils.List.zip xs ys in
-            let arg = cast x (subst u21) (subst u11) (r, neg p) in
-            let res = proc (xs, ys) arg in
-            cast res (subst u12) (subst u22) (r, p)
+          fun ys x ->
+            let arg = cast x u21 u11 (r, neg p) in
+            let res = proc ys arg in
+            cast res u12 u22 (r, p)
         )
       | _ -> raise @@ Eval_bug "non procedural value"
       end
@@ -623,11 +640,11 @@ module CC = struct
       | c when is_d c -> CoerceV (v, c)
       | _ -> raise @@ Eval_bug (asprintf "cannot coercion value: %a <%a>" Pp.CC.pp_value v Pp.pp_coercion c)
   and eval_app_valD ?(debug=false) env v1 v2 v3 = match v1 with (*値まで評価しきっているので，論文のようなlet k = t;;c in ~~とはできない*)
-    | FunSV proc -> proc ([], []) (v2, v3) 
+    | FunSV proc -> proc [] (v2, v3) 
     | FunDualV proc -> 
       begin match v3 with
-      | CoercionV (CId _) -> fst (proc ([], [])) v2
-      | _ -> snd (proc ([], [])) (v2, v3)
+      | CoercionV (CId _) -> fst (proc []) v2
+      | _ -> snd (proc []) (v2, v3)
       end
     | CoerceV (v1, CFun (s, t)) -> 
       begin match v3 with
@@ -638,8 +655,8 @@ module CC = struct
       end
     | _ -> raise @@ Eval_bug (asprintf "app_valD: application of non procedure value: %a" Pp.CC.pp_value v1)
   and eval_app_valM ?(debug=false) env v1 v2 = match v1 with (*値まで評価しきっているので，論文のようなlet k = t;;c in ~~とはできない*)
-    | FunBV proc -> proc ([], []) v2
-    | FunDualV proc -> fst (proc ([], [])) v2
+    | FunBV proc -> proc [] v2
+    | FunDualV proc -> fst (proc []) v2
     | CoerceV (v1, CFun (s, t)) -> eval_app_valD env v1 (coerce v2 s ~debug:debug) (CoercionV t) ~debug:debug
     | _ -> raise @@ Eval_bug (asprintf "app_valM: application of non procedure value: %a" Pp.CC.pp_value v1)
 
@@ -648,9 +665,9 @@ module CC = struct
     | Exp f ->
       let v = eval env f ~debug:debug in
       env, "-", v
-    | LetDecl (x, xs, f) ->
+    | LetDecl (x, f) ->
       let v = eval env f ~debug:debug in
-      let env = Environment.add x (xs, v) env in
+      let env = Environment.add x v env in
       env, x, v
 end
 
@@ -673,12 +690,13 @@ module KNorm = struct
     | CoercionExp c -> CoercionExp (subst_coercion s c)
     | LetExp (x, f1, f2) ->
       LetExp (x, subst_exp s f1, subst_exp s f2)
-    | LetRecSExp (x, tvs, arg, f1, f2) ->
-      LetRecSExp (x, tvs, arg, subst_exp s f1, subst_exp s f2)
-    | LetRecDualExp (x, tvs, arg, (f1, f1'), f2) ->
-      LetRecDualExp (x, tvs, arg, (subst_exp s f1, subst_exp s f1'), subst_exp s f2)
-    | LetRecBExp (x, tvs, arg, f1, f2) ->
-      LetRecBExp (x, tvs, arg, subst_exp s f1, subst_exp s f2)
+    | LetFunExp (x, tvs, fd, f) ->
+      LetFunExp (x, tvs, subst_fd s fd, subst_exp s f)
+  and subst_fd s = function
+    | FunB (arg, f) -> FunB (arg, subst_exp s f)
+    | FunS (arg, f) -> FunS (arg, subst_exp s f)
+    | FunDual (arg, (f, f')) -> FunDual (arg, (subst_exp s f, subst_exp s f'))
+    | FunTy f -> FunTy (subst_exp s f)
 
   let rec eval_exp ?(debug=false) kenv f = 
     if debug then fprintf err_formatter "keval <-- %a@." Pp.KNorm.pp_exp f;
@@ -790,13 +808,14 @@ module KNorm = struct
         | CoercionV c1, CoercionV c2 -> CoercionV (compose c1 c2 ~debug:debug)
         | _ -> raise @@ Eval_bug "cseq: sequence of non coercion value"
       end
-    | AppTy (x, tvs, tas) ->
+    | AppTy (x, _, tas) ->
       let v1 = Environment.find x kenv in
       let us = List.map nu_to_fresh tas in
       begin match v1 with
-        | FunSV proc -> FunSV (fun _ -> proc (tvs, us))
-        | FunDualV proc -> FunDualV (fun _ -> proc (tvs, us))
-        | FunBV proc -> FunBV (fun _ -> proc (tvs, us))
+        | FunBV proc -> FunBV (fun _ -> proc us)
+        | FunSV proc -> FunSV (fun _ -> proc us)
+        | FunDualV proc -> FunDualV (fun _ -> proc us)
+        | FunTyV proc -> proc us
         | _ -> raise @@ Eval_bug "AppTy: not fun value"
       end
     | CastExp (x, u1, u2, r_p) ->
@@ -806,49 +825,58 @@ module KNorm = struct
     | LetExp (x, f1, f2) -> 
       let v1 = eval_exp kenv f1 in
       eval_exp (Environment.add x v1 kenv) f2
-    | LetRecSExp (x, _, (y, k), f1, f2) -> 
-      let v1 = 
-        FunSV (
-          fun (tvs, us) -> fun (v1, v2) ->
-          let f1 = subst_exp (Utils.List.zip tvs us) f1 in
-          let rec f _ (v1, v2) =
-            let kenv = Environment.add x (FunSV f) kenv in
-            let kenv = Environment.add y v1 kenv in
-            let kenv = Environment.add k v2 kenv in
+    | LetFunExp (x, tvs, fd, f2) -> match fd with
+      | FunB (y, f1) -> 
+        let v1 = 
+          FunBV (
+            fun us -> fun v ->
+            let f1 = subst_exp (Utils.List.zip tvs us) f1 in
+            let rec f _ v =
+              let kenv = Environment.add x (FunBV f) kenv in
+              let kenv = Environment.add y v kenv in
+              eval_exp kenv f1
+            in f [] v
+          )
+        in eval_exp (Environment.add x v1 kenv) f2
+      | FunS ((y, k), f1) -> 
+        let v1 = 
+          FunSV (
+            fun us -> fun (v1, v2) ->
+            let f1 = subst_exp (Utils.List.zip tvs us) f1 in
+            let rec f _ (v1, v2) =
+              let kenv = Environment.add x (FunSV f) kenv in
+              let kenv = Environment.add y v1 kenv in
+              let kenv = Environment.add k v2 kenv in
+              eval_exp kenv f1
+            in f [] (v1, v2)
+          )
+        in eval_exp (Environment.add x v1 kenv) f2
+      | FunDual ((y, k), (f1, f1')) -> 
+        let v1 = 
+          FunDualV (
+            fun us -> 
+            let f1 = subst_exp (Utils.List.zip tvs us) f1 in
+            let f1' = subst_exp (Utils.List.zip tvs us) f1' in
+            let rec f1_ v =
+              let kenv = Environment.add x (FunDualV (fun _ -> (f1_, f1'_))) kenv in
+              let kenv = Environment.add y v kenv in
+              eval_exp kenv f1
+            and f1'_ (v, w) =
+              let kenv = Environment.add x (FunDualV (fun _ -> (f1_, f1'_))) kenv in
+              let kenv = Environment.add y v kenv in
+              let kenv = Environment.add k w kenv in
+              eval_exp kenv f1'
+            in (f1_, f1'_)
+          )
+        in eval_exp (Environment.add x v1 kenv) f2
+      | FunTy f1 ->
+        let v1 = 
+          FunTyV (
+            fun us ->
+            let f1 = subst_exp (Utils.List.zip tvs us) f1 in
             eval_exp kenv f1
-          in f ([], []) (v1, v2)
-        )
-      in eval_exp (Environment.add x v1 kenv) f2
-    | LetRecDualExp (x, _, (y, k), (f1, f1'), f2) -> 
-      let v1 = 
-        FunDualV (
-          fun (xs, ys) -> 
-          let f1 = subst_exp (Utils.List.zip xs ys) f1 in
-          let f1' = subst_exp (Utils.List.zip xs ys) f1' in
-          let rec f1_ v =
-            let kenv = Environment.add x (FunDualV (fun _ -> (f1_, f1'_))) kenv in
-            let kenv = Environment.add y v kenv in
-            eval_exp kenv f1
-          and f1'_ (v, w) =
-            let kenv = Environment.add x (FunDualV (fun _ -> (f1_, f1'_))) kenv in
-            let kenv = Environment.add y v kenv in
-            let kenv = Environment.add k w kenv in
-            eval_exp kenv f1'
-          in (f1_, f1'_)
-        )
-      in eval_exp (Environment.add x v1 kenv) f2
-    | LetRecBExp (x, _, y, f1, f2) ->
-      let v1 = 
-        FunBV (
-          fun (tvs, us) -> fun v ->
-          let f1 = subst_exp (Utils.List.zip tvs us) f1 in
-          let rec f _ v =
-            let kenv = Environment.add x (FunBV f) kenv in
-            let kenv = Environment.add y v kenv in
-            eval_exp kenv f1
-          in f ([], []) v
-        )
-      in eval_exp (Environment.add x v1 kenv) f2
+          )
+        in eval_exp (Environment.add x v1 kenv) f2
   and cast ?(debug=false) v u1 u2 (r, p) = 
     let print_debug f = Utils.Format.make_print_debug debug f in
     print_debug "cast <-- %a: %a => %a@." Pp.KNorm.pp_value v Pp.pp_ty u1 Pp.pp_ty u2;
@@ -883,11 +911,10 @@ module KNorm = struct
       begin match v with
         | FunBV proc -> 
           FunBV (
-            fun (tvs, ts) -> fun x ->
-              let subst = subst_type @@ Utils.List.zip tvs ts in
-              let arg = cast x (subst u21) (subst u11) (r, (neg p)) in
-              let res = proc (tvs, ts) arg in
-              cast res (subst u12) (subst u22) (r, p)
+            fun us -> fun x ->
+              let arg = cast x u21 u11 (r, (neg p)) in
+              let res = proc us arg in
+              cast res u12 u22 (r, p)
           )
         | _ -> raise @@ Eval_bug "non procedual value"
       end
@@ -1014,6 +1041,8 @@ module KNorm = struct
     | _, MatchWild _ -> true, kenv
     | CoerceV (ConsV (v1, v2), CList s), MatchCons _ -> 
       match_mf ~debug:debug kenv (ConsV (coerce ~debug:debug v1 s, coerce ~debug:debug v2 (CList s))) mf (* lazy *)
+    | CoerceV (TupleV vs, CTuple ss), MatchTuple _ -> 
+      match_mf ~debug:debug kenv (TupleV (List.map2 (fun v -> fun s -> coerce ~debug:debug v s) vs ss)) mf
     | _, (MatchVar _ | MatchBLit _ | MatchULit) -> raise @@ Eval_bug "MatchVar, MatchBLit, MatchULit  does not appear in KNormal form"
     | _ -> false, kenv 
   and eval_next ?(debug=false) kenv v ms = match ms with
@@ -1023,11 +1052,11 @@ module KNorm = struct
       else eval_next ~debug:debug kenv v ms
     | [] -> raise @@ Eval_bug "Didn't match"
   and eval_app_valD ?(debug=false) kenv v1 v2 v3 = match v1 with
-    | FunSV proc -> proc ([], []) (v2, v3)
+    | FunSV proc -> proc [] (v2, v3)
     | FunDualV proc -> 
       begin match v3 with
-      | CoercionV (CId _) -> fst (proc ([], [])) v2
-      | _ -> snd (proc ([], [])) (v2, v3)
+      | CoercionV (CId _) -> fst (proc []) v2
+      | _ -> snd (proc []) (v2, v3)
       end
     | CoerceV (v1, CFun (s, t)) -> 
       begin match v3 with
@@ -1038,8 +1067,8 @@ module KNorm = struct
       end
     | _ -> raise @@ Eval_bug "app_valD: application of non procedure value"
   and eval_app_valM ?(debug=false) env v1 v2 = match v1 with (*値まで評価しきっているので，論文のようなlet k = t;;c in ~~とはできない*)
-    | FunDualV proc -> fst (proc ([], [])) v2
-    | FunBV proc -> proc ([], []) v2
+    | FunDualV proc -> fst (proc []) v2
+    | FunBV proc -> proc [] v2
     | CoerceV (v1, CFun (s, t)) -> eval_app_valD env v1 (coerce v2 s ~debug:debug) (CoercionV t) ~debug:debug
     | _ -> raise @@ Eval_bug "app_valM: application of non procedure value"
 
@@ -1049,50 +1078,60 @@ module KNorm = struct
       let v = eval_exp kenv f ~debug:debug in
       let kenv = Environment.add x v kenv in
       kenv, x, v
-    | LetRecSDecl (x, _, (y, k), f') -> 
-      let v = 
-        FunSV (
-          fun (tvs, us) -> fun (v1, v2) ->
-          let f' = subst_exp (Utils.List.zip tvs us) f' in
-          let rec f _ (v1, v2) =
-            let kenv = Environment.add x (FunSV f) kenv in
-            let kenv = Environment.add y v1 kenv in
-            let kenv = Environment.add k v2 kenv in
+    | LetFunDecl (x, tvs, fd) -> match fd with
+      | FunB (y, f') ->  
+        let v = 
+          FunBV (
+            fun us -> fun v ->
+            let f' = subst_exp (Utils.List.zip tvs us) f' in
+            let rec f _ v =
+              let kenv = Environment.add x (FunBV f) kenv in
+              let kenv = Environment.add y v kenv in
+              eval_exp kenv f'
+            in f [] v
+          )
+        in let kenv = Environment.add x v kenv in
+        kenv, x, v
+      | FunS ((y, k), f') -> 
+        let v = 
+          FunSV (
+            fun us -> fun (v1, v2) ->
+            let f' = subst_exp (Utils.List.zip tvs us) f' in
+            let rec f _ (v1, v2) =
+              let kenv = Environment.add x (FunSV f) kenv in
+              let kenv = Environment.add y v1 kenv in
+              let kenv = Environment.add k v2 kenv in
+              eval_exp kenv f'
+            in f [] (v1, v2)
+          )
+        in let kenv = Environment.add x v kenv in
+        kenv, x, v
+      | FunDual ((y, k), (f1, f1')) -> 
+        let v = 
+          FunDualV (
+            fun us -> 
+            let f1 = subst_exp (Utils.List.zip tvs us) f1 in
+            let f1' = subst_exp (Utils.List.zip tvs us) f1' in
+            let rec f1_ v =
+              let kenv = Environment.add x (FunDualV (fun _ -> (f1_, f1'_))) kenv in
+              let kenv = Environment.add y v kenv in
+              eval_exp kenv f1
+            and f1'_ (v, w) =
+              let kenv = Environment.add x (FunDualV (fun _ -> (f1_, f1'_))) kenv in
+              let kenv = Environment.add y v kenv in
+              let kenv = Environment.add k w kenv in
+              eval_exp kenv f1'
+            in (f1_, f1'_)
+          )
+        in let kenv = Environment.add x v kenv in
+        kenv, x, v
+      | FunTy f' -> 
+        let v = 
+          FunTyV (
+            fun us ->
+            let f' = subst_exp (Utils.List.zip tvs us) f' in
             eval_exp kenv f'
-          in f ([], []) (v1, v2)
-        )
-      in let kenv = Environment.add x v kenv in
-      kenv, x, v
-    | LetRecDualDecl (x, _, (y, k), (f1, f1')) -> 
-      let v = 
-        FunDualV (
-          fun (xs, ys) -> 
-          let f1 = subst_exp (Utils.List.zip xs ys) f1 in
-          let f1' = subst_exp (Utils.List.zip xs ys) f1' in
-          let rec f1_ v =
-            let kenv = Environment.add x (FunDualV (fun _ -> (f1_, f1'_))) kenv in
-            let kenv = Environment.add y v kenv in
-            eval_exp kenv f1
-          and f1'_ (v, w) =
-            let kenv = Environment.add x (FunDualV (fun _ -> (f1_, f1'_))) kenv in
-            let kenv = Environment.add y v kenv in
-            let kenv = Environment.add k w kenv in
-            eval_exp kenv f1'
-          in (f1_, f1'_)
-        )
-      in let kenv = Environment.add x v kenv in
-      kenv, x, v
-    | LetRecBDecl (x, _, y, f') -> 
-      let v = 
-        FunBV (
-          fun (tvs, us) -> fun v ->
-          let f' = subst_exp (Utils.List.zip tvs us) f' in
-          let rec f _ v =
-            let kenv = Environment.add x (FunBV f) kenv in
-            let kenv = Environment.add y v kenv in
-            eval_exp kenv f'
-          in f ([], []) v
-        )
-      in let kenv = Environment.add x v kenv in
-      kenv, x, v
+          )
+        in let kenv = Environment.add x v kenv in
+        kenv, x, v
 end
