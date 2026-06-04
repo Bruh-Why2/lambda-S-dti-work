@@ -393,8 +393,7 @@ module ITGL = struct
       unify_dom_type_of_cod u1 u2
     | MatchExp (_, e, ms) ->
       let u_match = type_of_exp env e in
-      let u_exp = fresh_tyvar () in
-      type_of_ms env ms u_match u_exp;
+      let u_exp = type_of_ms env ms u_match TyDyn in (* dummy for meet *)
       u_exp
     | LetExp (r, x, e1, e2) ->
       let u1 = type_of_exp env e1 in
@@ -421,7 +420,7 @@ module ITGL = struct
       unify @@ CConsistent (u_exp, u);
       let u_exp = type_of_meet u_exp u in
       type_of_ms env ms u_match u_exp
-    | [] -> () 
+    | [] -> u_exp
 
   let type_of_program env = function
     | Exp e ->
@@ -592,10 +591,12 @@ module CC = struct
         u2
       else
         raise @@ Type_bug "if"
-    | FunBExp ((x, u1), f) ->
+    | FunBExp (tvs, (x, u1), f) ->
+      assert (tvs = []);
       let u2 = type_of_exp (Environment.add x (tysc_of_ty u1) env) f in
       TyFun (u1, u2)
-    | FixBExp ((x, y, u1, u), f) ->
+    | FixBExp (tvs, (x, y, u1, u), f) ->
+      assert (tvs = []);
       let u2 = type_of_exp (Environment.add y (tysc_of_ty u1) (Environment.add x (tysc_of_ty (TyFun (u1, u))) env)) f in
       TyFun (u1, u2)
     | AppMExp (f1, f2) ->
@@ -633,9 +634,22 @@ module CC = struct
       let u_match = type_of_exp env f in 
       let u = type_of_ms env u_match ms in
       u
-    | LetExp (x, xs, f1, f2) (*when is_value f1*) ->
-      let u1 = type_of_exp env f1 in
-      let us1 = TyScheme (xs, u1) in
+    | LetExp (x, f1, f2) (*when is_value f1*) -> 
+      let us1 = match f1 with
+        | FunBExp (xs, (y, u1), f) -> 
+          let u2 = type_of_exp (Environment.add y (tysc_of_ty u1) env) f in
+          TyScheme (xs, TyFun (u1, u2))
+        | FixBExp (xs, (x', y, u1, u), f) -> 
+          assert (x = x');
+          let u2 = type_of_exp (Environment.add y (tysc_of_ty u1) (Environment.add x (tysc_of_ty (TyFun (u1, u))) env)) f in
+          TyScheme (xs, TyFun (u1, u2))
+        | FunTyExp (xs, f) ->
+          let u = type_of_exp env f in
+          TyScheme (xs, u)
+        | f1 ->
+          let u = type_of_exp env f1 in
+          tysc_of_ty u
+      in
       let u2 = type_of_exp (Environment.add x us1 env) f2 in
       u2
     (* | LetExp _ ->
@@ -648,6 +662,7 @@ module CC = struct
       else raise @@ Type_bug (asprintf "cons: %a=%a" pp_ty (TyList u1) pp_ty u2)
     | TupleExp es -> TyTuple (List.map (fun e -> type_of_exp env e) es)
     | FunSExp _ | FixSExp _ | FunDualExp _ | FixDualExp _ | CoercionExp _ | AppDExp _ | CSeqExp _ -> raise @@ Occur_LS1 "yet"
+    | FunTyExp _ -> raise @@ Type_bug "should not occur FunTyExp outside of let"
   and type_of_ms env u_match = function
     | (mf, f) :: t ->
       let u_match', env' = type_of_matchform env mf in
@@ -662,5 +677,16 @@ module CC = struct
 
   let type_of_program env = function
     | Exp e -> type_of_exp env e
-    | LetDecl (_, _, f) -> type_of_exp env f
+    | LetDecl (x, f) -> match f with
+      | FunBExp (_, (y, u1), f) -> 
+        let u2 = type_of_exp (Environment.add y (tysc_of_ty u1) env) f in
+        TyFun (u1, u2)
+      | FixBExp (_, (x', y, u1, u), f) -> 
+        assert (x = x');
+        let u2 = type_of_exp (Environment.add y (tysc_of_ty u1) (Environment.add x (tysc_of_ty (TyFun (u1, u))) env)) f in
+        TyFun (u1, u2)
+      | FunTyExp (_, f) ->
+        type_of_exp env f
+      | f ->
+        type_of_exp env f
 end
