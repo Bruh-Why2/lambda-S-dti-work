@@ -62,19 +62,22 @@ let toC_ta x ppf u =
     (c_of_tyarg u);
   cnt_env := !cnt_env + 1
 
-let toC_tas ppf (y, k, n, x, tas) =
+let toC_tas ppf (y, num_zs, total, x, tas) =
   cnt_env := 0;
 
-  while (!cnt_env < k) do
+  (* yに登録されている自由変数をxにコピー *)
+  while (!cnt_env < num_zs) do
     fprintf ppf "((fun*)%s)->env[%d] = ((fun*)%s)->env[%d];\n" x !cnt_env y !cnt_env;
     cnt_env := !cnt_env + 1
   done;
 
+  (* 今回適用する型引数を代入 *)
   let toC_list ppf ta = pp_print_list (toC_ta x) ppf ta ~pp_sep:(fun ppf () -> fprintf ppf "\n") in
   fprintf ppf "%a\n" 
     toC_list tas;
   
-  while (!cnt_env < n) do
+  (* yに登録されている外側の型引数をxにコピー *)
+  while (!cnt_env < total) do
     fprintf ppf "((fun*)%s)->env[%d] = ((fun*)%s)->env[%d];\n" x !cnt_env y !cnt_env;
     cnt_env := !cnt_env + 1
   done
@@ -313,14 +316,25 @@ let rec toC_exp ppf f ~config ~is_main =
         y
         y
         z
-    | AppTy (y, k, n, tas) ->
-      let total_env_size = k + n + List.length tas in
+    | AppTy (y, zs_len, outer_tvs_len, tas) ->
+      let total_env_size = zs_len + List.length tas + outer_tvs_len in
       fprintf ppf "%s = (value)GC_MALLOC(sizeof(fun) + sizeof(void*) * %d);\n*((fun*)%s) = *((fun*)%s);\n%a"
         x
         total_env_size
         x
         y
-        toC_tas (y, k, total_env_size, x, tas)
+        toC_tas (y, zs_len, total_env_size, x, tas)
+    | AppTyFun (y, zs_len, outer_tvs_len, tas) ->
+      let total_env_size = zs_len + List.length tas + outer_tvs_len in
+      fprintf ppf "%s = (value)GC_MALLOC(sizeof(fun) + sizeof(void*) * %d);\n*((fun*)%s) = *((fun*)%s);\n%a%s = tfun_%s(%s, 0);\n"
+        x
+        total_env_size
+        x
+        y
+        toC_tas (y, zs_len, total_env_size, x, tas)
+        x
+        y
+        x
     | Cast (y, u1, u2, (r, p)) -> 
       (*
       Insert(x, y:u1=>^(r, p)u2)
@@ -376,6 +390,7 @@ let rec toC_exp ppf f ~config ~is_main =
     | IfLte (y, z, f1, f2) -> toC_exp ppf (IfLte (y, z, Insert (x, f1), Insert (x, f2)))
     | Match (y, ms) -> toC_exp ppf (Match (y, List.map (fun (mf, f) -> mf, Insert (x, f)) ms))
     | MakeCls (y, c, tvs, f) -> toC_exp ppf (MakeCls (y, c, tvs, Insert (x, f)))
+    | MakeTyCls (y, c, tvs, f) -> toC_exp ppf (MakeTyCls (y, c, tvs, Insert (x, f)))
     | SetTy (tv, f) -> toC_exp ppf (SetTy (tv, Insert (x, f)))
     (*insertはletの一項目には最初の一回しか入らないので，二回insertがかぶさることはない*)
     | Insert _ -> raise @@ ToC_bug "Insert should not be doubled"
@@ -429,6 +444,17 @@ let rec toC_exp ppf f ~config ~is_main =
       toC_vs (x, vs)
       toC_ftas (n, x, ftv)
       toC_exp f
+  | MakeTyCls (x, { entry = l; actual_fv = vs }, { ftvs = ftv; offset = n }, f) -> (*TODO*)
+    let env_size = List.length vs + List.length ftv + n in
+    cnt_env := 0;
+    fprintf ppf "value %s;\n%s = (value)GC_MALLOC(sizeof(fun) + sizeof(void*) * %d);\n%s%a%a%a"
+      x
+      x
+      env_size
+      (asprintf "((fun*)%s)->funcM = tfun_%s;\n" x l)
+      toC_vs (x, vs)
+      toC_ftas (n, x, ftv)
+      toC_exp f
   | SetTy ((i, { contents = opu }), f) -> begin match opu with (* ここはtoC_tycontentを参照 *)
     | None ->
         fprintf ppf "ty *_ty%d = (ty*)GC_MALLOC(sizeof(ty));\n_ty%d->tykind = TYVAR;\n%a"
@@ -458,7 +484,7 @@ let rec toC_exp ppf f ~config ~is_main =
     end
   (*以下は項の中にexpを含まないので，main関数かどうかを判定してreturn文を変える必要がある．
     main関数ならreturn 0;でプログラムを終える．main関数でなければ，その値自体をreturnする．*)
-  | Var _ | Int _ | Nil | Cons _ | Tuple _ | Add _ | Sub _ | Mul _ | Div _ | Mod _ | Hd _ | Tl _ | Tget _ | AppDDir _ | AppDCls _ | AppMDir _ | AppMCls _ | Cast _ | AppTy _ | CApp _ | Coercion _ | CSeq _ as f ->
+  | Var _ | Int _ | Nil | Cons _ | Tuple _ | Add _ | Sub _ | Mul _ | Div _ | Mod _ | Hd _ | Tl _ | Tget _ | AppDDir _ | AppDCls _ | AppMDir _ | AppMCls _ | Cast _ | AppTy _ | AppTyFun _ | CApp _ | Coercion _ | CSeq _ as f ->
     fprintf ppf "value retv;\n%areturn %s;\n"
       toC_exp (Insert ("retv", f))
       (if is_main then "0" else "retv")
@@ -695,6 +721,9 @@ let toC_label ppf fundef ~config = match fundef with
   fprintf ppf "static value fun%s_%s(value, value);"
     (if config.alt then "_alt" else "")
     l
+| FundefTy { name = l; tvs = (_, _); formal_fv = _; body = _ } ->
+  fprintf ppf "static value tfun_%s(value, value);"
+    l
 
 (*関数本体の定義*)
 let toC_funv ppf (exists_fun, l) =
@@ -720,6 +749,14 @@ let toC_fundef ppf fundef ~config = match fundef with
     (if config.alt then "_alt" else "")
     l
     x
+    toC_funv (V.mem (to_id l) (fv_exp f), l)
+    toC_fvs fvl
+    toC_tvs tvs
+    (toC_exp ~config ~is_main:false) f
+| FundefTy { name = l; tvs = (tvs, _); formal_fv = fvl; body = f } ->
+  cnt_env := 0;
+  fprintf ppf "static value tfun_%s(value cls, value dummy) {\n%a%a%a%a}"
+    l
     toC_funv (V.mem (to_id l) (fv_exp f), l)
     toC_fvs fvl
     toC_tvs tvs
