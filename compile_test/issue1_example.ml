@@ -1,3 +1,3 @@
 let id x = x in
 let orig = (id : ?) in
-orig 3;;
+print_int (orig 3);;
