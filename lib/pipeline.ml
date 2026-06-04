@@ -14,10 +14,10 @@ let log_section ppf title =
 let bundle_programs progs =
   let rec to_exp ps = match ps with
     | Syntax.CC.Exp e :: [] -> e
-    | Syntax.CC.LetDecl (x, tvs, e) :: [] -> 
-        Syntax.CC.LetExp (x, tvs, e, Syntax.CC.UConst)
-    | Syntax.CC.LetDecl (x, tvs, e) :: t -> 
-        Syntax.CC.LetExp (x, tvs, e, to_exp t)
+    | Syntax.CC.LetDecl (x, e) :: [] -> 
+        Syntax.CC.LetExp (x, e, Syntax.CC.UConst)
+    | Syntax.CC.LetDecl (x, e) :: t -> 
+        Syntax.CC.LetExp (x, e, to_exp t)
     | _ -> raise @@ Compile_bad "exp must appear only at the last position"
   in 
   Syntax.CC.Exp (to_exp (List.rev progs))
@@ -26,7 +26,7 @@ type 't state = {
   program : 't;
   ty : ty;
   tyenv : tysc Environment.t;
-  env : (tyvar list * CC.value) Environment.t;
+  env : CC.value Environment.t;
   kfunenvs : tyvar list Environment.t * id Environment.t * id Environment.t;
   kenv : KNorm.value Environment.t;
 }
@@ -80,6 +80,7 @@ let translate_to_CC ppf state ~config ~bench_ppf ~bench =
   print_title ppf (if config.intoB then "Cast-insertion" else "Coercion-insertion");
   let new_tyenv, f, u' = Translate.ITGL.translate ~intoB:config.intoB state.tyenv state.program in 
   (* NOTE: new_tyenv include current LetDecl type, so type check and translation must be executed in old tyenv *)
+  (* Pp.pp_ty2 Format.err_formatter u'; *)
   assert (Typing.is_equal state.ty u');
   let u'' = Typing.CC.type_of_program state.tyenv f in
   assert (Typing.is_equal state.ty u'');

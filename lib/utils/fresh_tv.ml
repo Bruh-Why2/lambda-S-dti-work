@@ -120,15 +120,21 @@ module CC = struct
       let e2, env = tv_renew_exp e2 env in
       let e3, env = tv_renew_exp e3 env in
       IfExp (e1, e2, e3), env
-    | FunBExp ((x, u), e) ->
+    | FunBExp (tvs, (x, u), e) ->
+      let env = List.fold_left (fun env -> fun (i, _ as tv) -> Syntax.Environment.add (string_of_int i) tv env) env tvs in
       let u, env = tv_renew_ty u env in
       let e, env = tv_renew_exp e env in
-      FunBExp ((x, u), e), env
-    | FixBExp ((x, y, u1, u2), e) ->
+      FunBExp (tvs, (x, u), e), env
+    | FixBExp (tvs, (x, y, u1, u2), e) ->
+      let env = List.fold_left (fun env -> fun (i, _ as tv) -> Syntax.Environment.add (string_of_int i) tv env) env tvs in
       let u1, env = tv_renew_ty u1 env in
       let u2, env = tv_renew_ty u2 env in
       let e, env = tv_renew_exp e env in
-      FixBExp ((x, y, u1, u2), e), env
+      FixBExp (tvs, (x, y, u1, u2), e), env
+    | FunTyExp (tvs, e) ->
+      let env = List.fold_left (fun env -> fun (i, _ as tv) -> Syntax.Environment.add (string_of_int i) tv env) env tvs in
+      let e, env = tv_renew_exp e env in
+      FunTyExp (tvs, e), env
     | AppMExp (e1, e2) ->
       let e1, env = tv_renew_exp e1 env in
       let e2, env = tv_renew_exp e2 env in
@@ -149,11 +155,10 @@ module CC = struct
       let e, env = tv_renew_exp e env in
       let ms, env = tv_renew_ms ms env in
       MatchExp (e, ms), env
-    | LetExp (x, tvs, e1, e2) ->
-      let env = List.fold_left (fun env -> fun (i, _ as tv) -> Syntax.Environment.add (string_of_int i) tv env) env tvs  in
+    | LetExp (x, e1, e2) ->
       let e1, env = tv_renew_exp e1 env in
       let e2, env = tv_renew_exp e2 env in
-      LetExp (x, tvs, e1, e2), env
+      LetExp (x, e1, e2), env
     | NilExp u -> 
       let u, env = tv_renew_ty u env in
       NilExp u, env
@@ -183,8 +188,8 @@ module CC = struct
   | Exp e -> 
     let e, _ = tv_renew_exp e Syntax.Environment.empty in 
     Exp e
-  | LetDecl (id, tvs, e) -> 
-    let env = List.fold_left (fun env -> fun (i, _ as tv) -> Syntax.Environment.add (string_of_int i) tv env) Syntax.Environment.empty tvs  in
+  | LetDecl (id, e) -> 
+    let env = Syntax.Environment.empty in
     let e, _ = tv_renew_exp e env in
-    LetDecl (id, tvs, e)
+    LetDecl (id, e)
 end

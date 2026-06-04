@@ -378,18 +378,18 @@ module KNorm = struct
 end
 
 let implementations_direct ~config = [
-    "exit", [], CC.lib_exit ~config, tysc_of_ty @@ TyFun (TyInt, TyUnit), KNorm.lib_exit ~config;
-    "is_bool", [], CC.is_some B ~config, is_some_type, KNorm.is_some B ~config;
-    "is_int", [], CC.is_some I ~config, is_some_type, KNorm.is_some I ~config;
-    "is_unit", [], CC.is_some U ~config, is_some_type, KNorm.is_some U ~config;
-    "is_fun", [], CC.is_some Ar ~config, is_some_type, KNorm.is_some Ar ~config;
-    "is_list", [], CC.is_some Li ~config, is_some_type, KNorm.is_some Li ~config;
-    "max_int", [], IntV max_int, tysc_of_ty TyInt, IntV max_int;
-    "min_int", [], IntV min_int, tysc_of_ty TyInt, IntV min_int;
-    "print_bool", [], CC.lib_print_bool ~config, tysc_of_ty @@ TyFun (TyBool, TyUnit), KNorm.lib_print_bool ~config;
-    "print_int", [], CC.lib_print_int ~config, tysc_of_ty @@ TyFun (TyInt, TyUnit), KNorm.lib_print_int ~config;
-    "print_newline", [], CC.lib_print_newline ~config, tysc_of_ty @@ TyFun (TyUnit, TyUnit), KNorm.lib_print_newline ~config;
-    "read_int", [], CC.lib_read_int ~config, tysc_of_ty @@ TyFun (TyUnit, TyInt), KNorm.lib_read_int ~config;
+    "exit", CC.lib_exit ~config, tysc_of_ty @@ TyFun (TyInt, TyUnit), KNorm.lib_exit ~config;
+    "is_bool", CC.is_some B ~config, is_some_type, KNorm.is_some B ~config;
+    "is_int", CC.is_some I ~config, is_some_type, KNorm.is_some I ~config;
+    "is_unit", CC.is_some U ~config, is_some_type, KNorm.is_some U ~config;
+    "is_fun", CC.is_some Ar ~config, is_some_type, KNorm.is_some Ar ~config;
+    "is_list", CC.is_some Li ~config, is_some_type, KNorm.is_some Li ~config;
+    "max_int", IntV max_int, tysc_of_ty TyInt, IntV max_int;
+    "min_int", IntV min_int, tysc_of_ty TyInt, IntV min_int;
+    "print_bool", CC.lib_print_bool ~config, tysc_of_ty @@ TyFun (TyBool, TyUnit), KNorm.lib_print_bool ~config;
+    "print_int", CC.lib_print_int ~config, tysc_of_ty @@ TyFun (TyInt, TyUnit), KNorm.lib_print_int ~config;
+    "print_newline", CC.lib_print_newline ~config, tysc_of_ty @@ TyFun (TyUnit, TyUnit), KNorm.lib_print_newline ~config;
+    "read_int", CC.lib_read_int ~config, tysc_of_ty @@ TyFun (TyUnit, TyInt), KNorm.lib_read_int ~config;
   ]
 
 let implementations_eval = [
@@ -406,8 +406,7 @@ let pervasives ~config =
   let env, tyenv, kfunenvs, kenv = Environment.empty, Environment.empty, (Environment.empty, Environment.empty, Environment.empty), Environment.empty in
   let env, tyenv, kfunenvs, kenv =
     List.fold_left
-      (fun (env, tyenv, (tvsenv, alphaenv, betaenv), kenv) (x, xs, v, u, kv) ->
-         Environment.add x (xs, v) env, Environment.add x u tyenv, (Environment.add x [] tvsenv, Environment.add x x alphaenv, Environment.add x x betaenv), Environment.add x kv kenv)
+      (fun (env, tyenv, (tvsenv, alphaenv, betaenv), kenv) (x, v, u, kv) ->         Environment.add x v env, Environment.add x u tyenv, (Environment.add x [] tvsenv, Environment.add x x alphaenv, Environment.add x x betaenv), Environment.add x kv kenv)
       (env, tyenv, kfunenvs, kenv)
       (implementations_direct ~config)
   in
