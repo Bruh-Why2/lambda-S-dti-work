@@ -20,6 +20,7 @@ depends: [
   "core_bench" {>= "v0.17"}
   "core_unix" {>= "v0.17"}
   "yojson" {>= "2.0"}
+  "llvm" {>= "19-static"}
   "ounit2" {with-test & >= "2.0"}
 ]
 build: [

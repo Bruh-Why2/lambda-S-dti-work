@@ -29,6 +29,7 @@
   (core_unix (>= v0.17))
   (yojson (>= 2.0))
   
+  (llvm (>="19-static"))
   (ounit2 (and :with-test (>= 2.0)))
  )
 )

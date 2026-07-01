@@ -42,7 +42,7 @@ let build_clang_cmd ?(log_dir="") ?(file="") ?(mode_str="") ?(src_files="")
       filename
   | None -> 
     (* clang result_C/stdin.c libC/*.c -o result/stdin.out -lgc -g3 -std=c2x -pg -O3 *)
-    asprintf "clang result_C/stdin.c %s%s%s%slibC/*.c -o result/stdin.out -lgc -g3 -std=c2x -pg" (* TODO: -O3 *)
+    asprintf "clang result_C/stdin.c %s%s%s%slibC/*.c -o result/stdin.out -lgc -g3 -std=c2x -pg   -I$(brew --prefix bdw-gc)/include -L$(brew --prefix bdw-gc)/lib" (* TODO: -O3 *)
       mode_var
       lst_var
       hash_var

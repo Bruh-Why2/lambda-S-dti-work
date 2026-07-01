@@ -2,4 +2,5 @@
 
 (library
   (name lambda_S_dti)
-  (public_name lambda-S-dti))
+  (public_name lambda-S-dti)
+  (libraries llvm llvm.analysis llvm.target llvm.all_backends))
