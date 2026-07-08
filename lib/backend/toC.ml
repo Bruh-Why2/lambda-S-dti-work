@@ -827,12 +827,43 @@ let tpl_t =
 let ty_t =
   let t = named_struct_type context "ty" in
   struct_set_body t [|
-    i8_type context;    (* tykind enum, uint8_t *)
-    ptr_t;               (* first word of union — covers tv, tylist *)
-    ptr_t;               (* second word — covers tyfun.right, or padding *)
+    uint8_t;(* tykind enum, uint8_t *)
+    ptr_t;(* first word of union — covers tv, tylist *)
+    ptr_t;(* second word — covers tyfun.right, or padding *)
   |] false;
   t
-
+(* Assuming 'ground_ty' is an 8-bit type based on the "header: 6byte" comment, 
+   but you can adjust this if it's actually an i32 or something else. *)
+let crc_t =
+  let t = named_struct_type context "struct.crc" in
+  let crckind_ty = uint8_t in
+  let bitfields_ty = uint8_t in 
+  
+  let g_proj_ty = uint8_t in (* Adjust if ground_ty is not uint8_t *)
+  let g_inj_ty  = uint8_t in
+  let arity_proj_ty = uint16_t in
+  let arity_inj_ty  = uint16_t in
+  let crcdat_payload_ty = array_type int_t 2 in
+  struct_set_body t [|
+    crckind_ty;       
+    bitfields_ty;     
+    g_proj_ty;          
+    g_inj_ty;           
+    arity_proj_ty;     
+    arity_inj_ty;      
+    crcdat_payload_ty  
+  |] false; 
+  t
+let range_t =
+  let t = named_struct_type context "range" in
+  struct_set_body t [|
+    ptr_t;                  (* filename: char* *)
+    i32_type context;       (* startline *)
+    i32_type context;       (* startchr *)
+    i32_type context;       (* endline *)
+    i32_type context;       (* endchr *)
+  |] false;
+  t
 
 let declare_ty_globals () =
   ignore (declare_global ty_t "tydyn"  the_module);
@@ -841,6 +872,14 @@ let declare_ty_globals () =
   ignore (declare_global ty_t "tyunit" the_module);
   ignore (declare_global ty_t "tyar"   the_module);
   ignore (declare_global ty_t "tyli"   the_module)
+
+let declare_crc_globals () =
+  ignore (declare_global crc_t "crc_id" the_module);
+  ignore (declare_global crc_t "crc_inj_INT" the_module);
+  ignore (declare_global crc_t "crc_inj_BOOL" the_module);
+  ignore (declare_global crc_t "crc_inj_UNIT" the_module);
+  ignore (declare_global crc_t "crc_inj_AR" the_module);
+  ignore (declare_global crc_t "crc_inj_LI" the_module)
 
 let declare_external name ret_ty param_tys =
   let fn_t = function_type ret_ty param_tys in
@@ -865,7 +904,24 @@ let runtime () =
     ignore (declare_external "newty" (ptr_t) [||]); (* ty* *)
     ignore (declare_external "cast" (value_t) [|value_t; ptr_t; ptr_t; uint32_t; uint8_t|]);
     ignore (declare_external "coerce" (value_t) [|value_t; ptr_t|]); (*value -> crc* -> value*)
-    ignore (declare_external "blame" (void_t) [|uint32_t; uint8_t|])
+    ignore (declare_external "blame" (void_t) [|uint32_t; uint8_t|]);
+    ignore (declare_external "GC_init" void_t [||]);
+    ignore (declare_external "register_static_crc" void_t [|ptr_t|]);
+    (* Stdlib - Gotta make the _alt and _cast versions too,
+    just doing the normal ones for now  *)
+    ignore (declare_external "fun_print_int" value_t [|value_t; value_t; value_t|]);
+    ignore (declare_external "fun_print_bool" value_t [|value_t; value_t; value_t|]);
+    ignore (declare_external "fun_print_newline" value_t [|value_t; value_t; value_t|]);
+    ignore (declare_external "fun_read_int" value_t [|value_t; value_t; value_t|]);
+    ignore (declare_external "fun_ignore" value_t [|value_t; value_t; value_t|]);
+    ignore (declare_external "fun_abs_ml" value_t [|value_t; value_t; value_t|]);
+    ignore (declare_external "fun_max" value_t [|value_t; value_t; value_t|]);
+    ignore (declare_external "fun_max_x" value_t [|value_t; value_t; value_t|]);
+    ignore (declare_external "fun_min" value_t [|value_t; value_t; value_t|]);
+    ignore (declare_external "fun_min_x" value_t [|value_t; value_t; value_t|]);
+    ignore (declare_external "fun_prec" value_t [|value_t; value_t; value_t|]);
+    ignore (declare_external "fun_succ" value_t [|value_t; value_t; value_t|]);
+    ignore (declare_external "fun_not_ml" value_t [|value_t; value_t; value_t|])
 
 let load_val ptr = build_load value_t ptr "load_val" builder (*can give naming later*)
 let load_var named_values x = match Hashtbl.find_opt named_values x with
@@ -893,8 +949,7 @@ let llvm_of_ty named_values = function
   | TyInt  ->
     (match lookup_global "tyint" the_module with
      | Some g -> g
-     | None -> failwith "tyint not declared")
-
+     | None -> raise @@ ToLLVM_bug "tyint not declared")
   | TyBool ->
     (match lookup_global "tybool" the_module with
      | Some g -> g
@@ -975,6 +1030,56 @@ let llvm_of_ty named_values = function
   | TyVar _ -> dump_module the_module; 
     raise (ToLLVM_bug "tyvar should cannot contain other than fun, list or tuple")
 (*型引数のCプログラム表記を出力する関数*)
+let llvm_of_ty_static = function
+  | TyInt  ->
+    (match lookup_global "tyint" the_module with
+     | Some g -> g
+     | None -> failwith "tyint not declared")
+
+  | TyBool ->
+    (match lookup_global "tybool" the_module with
+     | Some g -> g
+     | None -> failwith "tybool not declared")
+
+  | TyUnit ->
+    (match lookup_global "tyunit" the_module with
+     | Some g -> g
+     | None -> failwith "tyunit not declared")
+
+  | TyDyn  ->
+    (match lookup_global "tydyn" the_module with
+     | Some g -> g
+     | None -> failwith "tydyn not declared")
+
+  | TyFun (TyDyn, TyDyn) ->
+    (match lookup_global "tyar" the_module with
+     | Some g -> g
+     | None -> failwith "tyar not declared")
+
+  | TyFun (_, _) as u ->
+    let name = TyManager.find u in
+    (match lookup_global name the_module with
+     | Some g -> g
+     | None -> failwith (name ^ " not declared"))
+
+  | TyList TyDyn ->
+    (match lookup_global "tyli" the_module with
+     | Some g -> g
+     | None -> failwith "tyli not declared")
+
+  | TyList _ as u ->
+    let name = TyManager.find u in
+    (match lookup_global name the_module with
+     | Some g -> g
+     | None -> failwith (name ^ " not declared"))
+
+  | TyTuple _ as u ->
+    let name = TyManager.find u in
+    (match lookup_global name the_module with
+     | Some g -> g
+     | None -> failwith (name ^ " not declared"))
+  | TyVar _ -> dump_module the_module; 
+    raise (ToLLVM_bug "static version")
 let llvm_of_tyarg named_values = function
   | Ty u -> llvm_of_ty named_values u
   | TyNu -> 
@@ -991,7 +1096,7 @@ let toLLVM_v named_values x v =
   let slot_offset = const_int int_t (idx * 8) in
   let addr = build_add fun_int (build_add hdr_size slot_offset "off" builder) "addr" builder in
   let elem_ptr = build_inttoptr addr ptr_t "elem_ptr" builder in
-  let v_val = load_val (load_var named_values v) in 
+  let v_val = load_var named_values v in 
   ignore(build_store v_val elem_ptr builder)
 
 let toLLVM_vs named_values (x, vs) = List.iter (toLLVM_v named_values x) vs
@@ -1133,6 +1238,72 @@ let toLLVM_tykind = function
 	|	"SUBSTITUTED" -> const_int int_t 8
   | _ -> raise @@ ToLLVM_error "Not a tykind"  
 
+let toLLVM_crc c = 
+  (* if CrcManager.mem c then 
+    fprintf ppf "%s = (value)&%s;" x (CrcManager.find c)
+else*)match c with 
+  | CId -> 
+    (match lookup_global "crc_id" the_module with
+     | Some g -> g
+     | None -> failwith "crc_id not declared")
+    (* "%s = (value)&crc_id;"  *)
+  (* | CSeqInj (CId, (I | B | U | Ar | Li as t)) ->
+    fprintf ppf "%s = (value)&crc_inj_%a;" x toC_tag t
+  | CSeqInj (CId, Tp arity) ->
+    fprintf ppf "crc %s_temp = {0};\n%s_temp.crckind = SEQ_INJ;\n%s_temp.g_inj = G_TP;\n%s_temp.arity_inj = %d;\n%s_temp.has_tv = 0;\n%s_temp.crcdat.seq_tv.ptr.s = &crc_id;\n%s = (value)alloc_crc(&%s_temp);"
+      x x x x arity x x x x
+  | CSeqInj (CFun _ as c1, Ar) ->
+    fprintf ppf "value %s_cfun;\n%a\ncrc %s_temp = {0};\n%s_temp.crckind = SEQ_INJ;\n%s_temp.g_inj = G_AR;\n%s_temp.has_tv = ((crc*)%s_cfun)->has_tv;\n%s_temp.crcdat.seq_tv.ptr.s = (crc*)%s_cfun;\n%s = (value)alloc_crc(&%s_temp);"
+      x toC_crc (c1, x ^ "_cfun") x x x x x x x x x
+  | CSeqInj (CList _ as c1, Li) ->
+    fprintf ppf "value %s_clist;\n%a\ncrc %s_temp = {0};\n%s_temp.crckind = SEQ_INJ;\n%s_temp.g_inj = G_LI;\n%s_temp.has_tv = ((crc*)%s_clist)->has_tv;\n%s_temp.crcdat.seq_tv.ptr.s = (crc*)%s_clist;\n%s = (value)alloc_crc(&%s_temp);"
+      x toC_crc (c1, x ^ "_clist") x x x x x x x x x
+  | CSeqInj (CTuple _ as c1, Tp arity) ->
+    fprintf ppf "value %s_ctuple;\n%a\ncrc %s_temp = {0};\n%s_temp.crckind = SEQ_INJ;\n%s_temp.g_inj = G_TP;\n%s_temp.arity_inj = %d;\n%s_temp.has_tv = ((crc*)%s_ctuple)->has_tv;\n%s_temp.crcdat.seq_tv.ptr.s = (crc*)%s_ctuple;\n%s = (value)alloc_crc(&%s_temp);"
+      x toC_crc (c1, x ^ "_ctuple") x x x x arity x x x x x x
+  | CSeqProj ((I | B | U | Ar | Li as t), (r, p), CId) ->
+    fprintf ppf "crc %s_temp = {0};\n%s_temp.crckind = SEQ_PROJ;\n%s_temp.g_proj = G_%a;\n%s_temp.p_proj = %d;\n%s_temp.has_tv = 0;\n%s_temp.crcdat.seq_tv.rid_proj = %d;\n%s_temp.crcdat.seq_tv.ptr.s = &crc_id;\n%s = (value)alloc_crc(&%s_temp);"
+      x x x toC_tag t x (match p with Pos -> 1 | Neg -> 0) x x r x x x
+  | CSeqProj (Tp arity, (r, p), CId) ->
+    fprintf ppf "crc %s_temp = {0};\n%s_temp.crckind = SEQ_PROJ;\n%s_temp.g_proj = G_TP;\n%s_temp.arity_proj = %d;\n%s_temp.p_proj = %d;\n%s_temp.has_tv = 0;\n%s_temp.crcdat.seq_tv.rid_proj = %d;\n%s_temp.crcdat.seq_tv.ptr.s = (crc*)&crc_id;\n%s = (value)alloc_crc(&%s_temp);"
+      x x x x arity x (match p with Pos -> 1 | Neg -> 0) x x r x x x
+  | CSeqProj (Ar, (r, p), (CFun _ as c2)) ->
+    fprintf ppf "value %s_cfun;\n%a\ncrc %s_temp = {0};\n%s_temp.crckind = SEQ_PROJ;\n%s_temp.g_proj = G_AR;\n%s_temp.p_proj = %d;\n%s_temp.has_tv = ((crc*)%s_cfun)->has_tv;\n%s_temp.crcdat.seq_tv.rid_proj = %d;\n%s_temp.crcdat.seq_tv.ptr.s = (crc*)%s_cfun;\n%s = (value)alloc_crc(&%s_temp);"
+      x toC_crc (c2, x ^ "_cfun") x x x x (match p with Pos -> 1 | Neg -> 0) x x x r x x x x
+  | CSeqProj (Li, (r, p), (CList _ as c2)) ->
+    fprintf ppf "value %s_clist;\n%a\ncrc %s_temp = {0};\n%s_temp.crckind = SEQ_PROJ;\n%s_temp.g_proj = G_LI;\n%s_temp.p_proj = %d;\n%s_temp.has_tv = ((crc*)%s_clist)->has_tv;\n%s_temp.crcdat.seq_tv.rid_proj = %d;\n%s_temp.crcdat.seq_tv.ptr.s = (crc*)%s_clist;\n%s = (value)alloc_crc(&%s_temp);"
+      x toC_crc (c2, x ^ "_clist") x x x x (match p with Pos -> 1 | Neg -> 0) x x x r x x x x
+  | CSeqProj (Tp arity, (r, p), (CTuple _ as c2)) ->
+    fprintf ppf "value %s_ctuple;\n%a\ncrc %s_temp = {0};\n%s_temp.crckind = SEQ_PROJ;\n%s_temp.g_proj = G_TP;\n%s_temp.arity_proj = %d;\n%s_temp.p_proj = %d;\n%s_temp.has_tv = ((crc*)%s_ctuple)->has_tv;\n%s_temp.crcdat.seq_tv.rid_proj = %d;\n%s_temp.crcdat.seq_tv.ptr.s = (crc*)%s_ctuple;\n%s = (value)alloc_crc(&%s_temp);"
+      x toC_crc (c2, x ^ "_ctuple") x x x x arity x (match p with Pos -> 1 | Neg -> 0) x x x r x x x x
+  | CTvInj (tv, (r, p)) ->
+    fprintf ppf "crc %s_temp = {0};\n%s_temp.crckind = TV_INJ;\n%s_temp.p_inj = %d;\n%s_temp.has_tv = 1;\n%s_temp.crcdat.seq_tv.rid_inj = %d;\n%s_temp.crcdat.seq_tv.ptr.tv = %s;\n%s = (value)alloc_crc(&%s_temp);"
+      x x x (match p with Pos -> 1 | Neg -> 0) x x r x (c_of_ty (TyVar tv)) x x
+  | CTvProj (tv, (r, p)) ->
+    fprintf ppf "crc %s_temp = {0};\n%s_temp.crckind = TV_PROJ;\n%s_temp.p_proj = %d;\n%s_temp.has_tv = 1;\n%s_temp.crcdat.seq_tv.rid_proj = %d;\n%s_temp.crcdat.seq_tv.ptr.tv = %s;\n%s = (value)alloc_crc(&%s_temp);"
+      x x x (match p with Pos -> 1 | Neg -> 0) x x r x (c_of_ty (TyVar tv)) x x
+  | CFun (c1, c2) ->
+    fprintf ppf "value %s_c1;\n%a\nvalue %s_c2;\n%a\ncrc %s_temp = {0};\n%s_temp.crckind = FUN;\n%s_temp.has_tv = ((crc*)%s_c1)->has_tv | ((crc*)%s_c2)->has_tv;\n%s_temp.crcdat.fun_crc.c1 = (crc*)%s_c1;\n%s_temp.crcdat.fun_crc.c2 = (crc*)%s_c2;\n%s = (value)alloc_crc(&%s_temp);"
+      x toC_crc (c1, x ^ "_c1") x toC_crc (c2, x ^ "_c2") x x x x x x x x x x x
+  | CList c ->
+    fprintf ppf "value %s_c;\n%a\ncrc %s_temp = {0};\n%s_temp.crckind = LIST;\n%s_temp.has_tv = ((crc*)%s_c)->has_tv;\n%s_temp.crcdat.lst_crc = (crc*)%s_c;\n%s = (value)alloc_crc(&%s_temp);" 
+      x toC_crc (c, x ^ "_c") x x x x x x x x
+  | CTuple cs ->
+    let arity = List.length cs in
+    let toC_sep ppf () = fprintf ppf "\n" in
+    let counter = ref 0 in
+    let toC_elem ppf c = 
+      let i = !counter in
+      counter := !counter + 1;
+      fprintf ppf "value %s_c%d;\n%a\n%s_crcs[%d] = (crc*)%s_c%d;" x i toC_crc (c, Printf.sprintf "%s_c%d" x i) x i x i
+    in
+    fprintf ppf "crc **%s_crcs = (crc**)GC_MALLOC(sizeof(crc*) * %d);\n%a\ncrc %s_temp = {0};\n%s_temp.crckind = TUPLE;\n%s_temp.has_tv = 0;\n"
+      x arity (pp_print_list toC_elem ~pp_sep:toC_sep) cs x x x;
+    for i = 0 to arity - 1 do
+       fprintf ppf "%s_temp.has_tv |= ((crc*)%s_c%d)->has_tv;\n" x x i
+    done;
+    fprintf ppf "%s_temp.crcdat.tpl_crc.arity = %d;\n%s_temp.crcdat.tpl_crc.crcs = %s_crcs;\n%s = (value)alloc_crc(&%s_temp);" x arity x x x x *)
+  | _ -> raise @@ ToLLVM_bug "bad coercion"
 
 let rec toLLVM_exp named_values (f) ~config = 
   let toLLVM_exp = toLLVM_exp named_values ~config in
@@ -1187,7 +1358,35 @@ let rec toLLVM_exp named_values (f) ~config =
     let tl_elem = load_var y in
     ignore(build_store (tl_elem) tl_ptr builder);
     build_ptrtoint lst value_t "cast_value" builder
-  | Tuple _ -> Printf.eprintf "Tuple\n%!"; const_int int_t 1
+  | Tuple ys -> 
+    Printf.eprintf "Tuple\n%!";
+    let arity = List.length ys in
+    let counter = ref (-1) in
+    cnt_env_llvm := 0;
+    let hdr_size = build_ptrtoint (size_of tpl_t) int_t "hdr_size" builder in
+    let val_size = build_ptrtoint (size_of value_t) int_t "val_size" builder in
+    let n_env = const_int int_t arity in
+    let env_bytes = build_mul val_size n_env "env_bytes" builder in
+    let arg = build_add hdr_size env_bytes "total_size" builder in
+    let args = [|arg|] in
+    let fn_t = function_type (ptr_t) [|size_t|] in
+    let tpl_x = call_function "GC_malloc" fn_t args "fun_alloc" in
+    let arity_ptr = build_struct_gep tpl_t tpl_x 0 "arity_ptr" builder in
+    ignore (build_store (const_int uint16_t arity) arity_ptr builder);
+    let toLLVM_iter y =
+      counter := !counter + 1;
+      let idx = !counter in
+      (* fields start after the header — use pointer arithmetic *)
+      let hdr_size_val = build_ptrtoint (size_of tpl_t) int_t "hdr_size" builder in
+      let tpl_int      = build_ptrtoint tpl_x int_t "tpl_int" builder in
+      let slot_offset  = const_int int_t (idx * 8) in
+      let addr         = build_add tpl_int (build_add hdr_size_val slot_offset "off" builder) "addr" builder in
+      let field_ptr    = build_inttoptr addr ptr_t "field_ptr" builder in
+      ignore (build_store (load_var y) field_ptr builder)
+    in
+    let toLLVM_list ys = List.iter toLLVM_iter ys in
+    toLLVM_list ys;
+    tpl_x
   | Hd x -> 
     Printf.eprintf "Hd\n%!";
     let lst_ptr = load_lst(load_var x) in
@@ -1315,7 +1514,7 @@ let rec toLLVM_exp named_values (f) ~config =
       let parity = const_int int_t (match p with Pos -> 1 | Neg -> 0) in
       let args = [|const_int int_t rid; parity|] in
       let fn_t = function_type (void_t) [|uint32_t; uint8_t|] in
-      let else_val = call_function "blame" fn_t args "CApp" in
+      let else_val = call_function "blame" fn_t args "" in
       let new_else_bb = insertion_block builder in
       let merge_bb = append_block context "ifcont" the_function in
       position_at_end merge_bb builder;
@@ -1331,7 +1530,9 @@ let rec toLLVM_exp named_values (f) ~config =
       let args = [|load_var x ; load_crc (load_var y)|] in
       let fn_t = function_type (value_t) [|value_t; ptr_t|] in
       call_function "coerce" fn_t args "CApp"
-  | Coercion _ -> Printf.eprintf "Coercion\n%!"; const_int int_t 2
+  | Coercion c -> 
+    Printf.eprintf "Coercion\n%!"; 
+    toLLVM_crc(c)
   | CSeq (x, y) -> 
     Printf.eprintf "CSeq\n%!";
     let arg1 = load_crc(load_var x) in
@@ -1383,7 +1584,7 @@ let rec toLLVM_exp named_values (f) ~config =
     toLLVM_vs named_values (x, vs);
     toLLVM_ftas named_values (n, fun_x, ftv);
     toLLVM_exp f
-  | MakeTyCls (x, {entry = l; actual_fv = vs}, {ftvs = ftv; offset = n}, f) ->
+  | MakeTyCls (x, {entry = l; actual_fv = vs}, {ftvs = ftv; offset = n}, f) -> 
     Printf.eprintf "MakeTyCls\n%!";
     let ptr = build_alloca value_t x builder in
     let env_size = List.length vs + List.length ftv + n in 
@@ -1424,25 +1625,45 @@ let rec toLLVM_exp named_values (f) ~config =
       ignore (build_store ty_ptr ptr_alloca builder);
       Hashtbl.add named_values name ptr_alloca;
       toLLVM_exp f
-    | Some (TyFun (_, _)) -> 
-      (* fprintf ppf "ty *_tyfun%d = (ty*)GC_MALLOC(sizeof(ty));\n_tyfun%d->tykind = TYFUN;\n_tyfun%d->tydat.tyfun.left = (ty*)GC_MALLOC(sizeof(ty));\n_tyfun%d->tydat.tyfun.right = (ty*)GC_MALLOC(sizeof(ty));\n_tyfun%d->tydat.tyfun.left = %s;\n_tyfun%d->tydat.tyfun.right = %s;\n%a"
-        i
-        i
-        i
-        i
-        i
-        (c_of_ty u1)
-        i
-        (c_of_ty u2) *)
-        toLLVM_exp f
-    | Some (TyList _) -> 
-      (* "ty *_tylist%d = (ty*)GC_MALLOC(sizeof(ty));\n_tylist%d->tykind = TYLIST;\n_tylist%d->tydat.tylist = (ty*)GC_MALLOC(sizeof(ty));\n_tylist%d->tydat.tylist = %s;\n%a"
-        i
-        i
-        i
-        i
-        (c_of_ty u) *)
-        toLLVM_exp f
+    | Some (TyFun (u1, u2)) ->
+      let name = Printf.sprintf "_tyfun%d" i in
+      let fn_t = function_type ptr_t [|size_t|] in
+      let ty_size = build_ptrtoint (size_of ty_t) int_t "size" builder in
+      let args = [|ty_size|] in
+      let tyfun_ptr = call_function "GC_malloc" fn_t args "tyfun_alloc" in
+      let kind_ptr = build_struct_gep ty_t tyfun_ptr 0 "kind_ptr" builder in
+      ignore (build_store (toLLVM_tykind "TYFUN") kind_ptr builder);
+      let left_alloc = call_function "GC_malloc" fn_t args "tyfun_left_alloc" in
+      let right_alloc = call_function "GC_malloc" fn_t args "tyfun_right_alloc" in
+      let left_field  = build_struct_gep ty_t tyfun_ptr 1 "left_field" builder in
+      let right_field = build_struct_gep ty_t tyfun_ptr 2 "right_field" builder in
+      ignore (build_store left_alloc left_field builder);
+      ignore (build_store right_alloc right_field builder);
+      let u1_val = llvm_of_ty named_values u1 in
+      let u2_val = llvm_of_ty named_values u2 in
+      ignore (build_store u1_val left_field builder);
+      ignore (build_store u2_val right_field builder);
+      let ptr_alloca = build_alloca ptr_t name builder in
+      ignore (build_store tyfun_ptr ptr_alloca builder);
+      Hashtbl.add named_values name ptr_alloca;
+      toLLVM_exp f
+    | Some (TyList u) ->
+      let name = Printf.sprintf "_tylist%d" i in
+      let fn_t = function_type ptr_t [|size_t|] in
+      let ty_size = build_ptrtoint (size_of ty_t) int_t "size" builder in
+      let args = [|ty_size|] in
+      let tylist_ptr = call_function "GC_malloc" fn_t args "tylist_alloc" in
+      let kind_ptr = build_struct_gep ty_t tylist_ptr 0 "kind_ptr" builder in
+      ignore (build_store (toLLVM_tykind "TYLIST") kind_ptr builder);
+      let list_alloc = call_function "GC_malloc" fn_t args "tylist_list_alloc" in
+      let tylist_field = build_struct_gep ty_t tylist_ptr 1 "tylist_field" builder in
+      ignore (build_store list_alloc tylist_field builder);
+      let u_val = llvm_of_ty named_values u in
+      ignore (build_store u_val tylist_field builder);
+      let ptr_alloca = build_alloca ptr_t name builder in
+      ignore (build_store tylist_ptr ptr_alloca builder);
+      Hashtbl.add named_values name ptr_alloca;
+      toLLVM_exp f
     | Some _ -> raise @@ ToLLVM_bug "not tyfun or tylist is in tyvar option"
     end 
   (* do this later*)
@@ -1467,6 +1688,185 @@ and if_else named_values cond f1 f2 ~config =
   position_at_end new_else_bb builder; ignore (build_br merge_bb builder);
   position_at_end merge_bb builder;
   phi
+
+let toLLVM_tydecl (_, name) =
+  ignore (declare_global ty_t name the_module)
+
+let toLLVM_tydecls l = 
+  List.iter toLLVM_tydecl l
+
+(*型の定義*)
+let toLLVM_tycontent (u, name) = 
+  let g = match lookup_global name the_module with
+    | Some g -> g
+    | None -> raise @@ ToLLVM_bug (name ^ " not declared")
+  in
+  match u with
+  | TyVar _ -> (* TyVarはtykindをTYVARにする *)
+    let init = const_named_struct ty_t [|toLLVM_tykind "TYVAR"; const_null ptr_t; const_null ptr_t|] in
+    set_initializer init g;
+    set_linkage Linkage.Internal g
+  | TyFun (u1, u2) -> 
+    (*TyFunはtykindをTYFUNとする
+      さらに，leftとrightにTyFunの二つの型をそれぞれ代入する*)
+    let left = llvm_of_ty_static u1 in
+    let right = llvm_of_ty_static u2 in
+    let init = const_named_struct ty_t [|toLLVM_tykind "TYFUN"; left; right|] in
+    set_initializer init g;
+    set_linkage Linkage.Internal g
+  | TyList u ->
+    let inner = llvm_of_ty_static u in
+    let init = const_named_struct ty_t [|toLLVM_tykind "TYLIST"; inner; const_null ptr_t|] in
+    set_initializer init g;
+    set_linkage Linkage.Internal g
+  | TyTuple us ->
+    let arity = List.length us in
+    let ty_ptrs = Array.of_list (List.map llvm_of_ty_static us) in
+    (* let arr_t = array_type ptr_t arity in *)
+    let arr = const_array ptr_t ty_ptrs in
+    let arr_g = define_global (name ^ "_tys") arr the_module in
+    set_linkage Linkage.Internal arr_g;
+    let init = const_named_struct ty_t [|toLLVM_tykind "TYTUPLE"; const_int uint16_t arity; arr_g|] in
+    set_initializer init g;
+    set_linkage Linkage.Internal g
+  | u -> raise @@ ToLLVM_bug (Format.asprintf "not tyvar, tyfun or tylist in tycontent: %a" Pp.pp_ty2 u) 
+
+let toLLVM_tycontents l = 
+  List.iter toLLVM_tycontent l
+
+(*型定義全体を記述*)
+let toLLVM_tys l =
+  toLLVM_tydecls l;
+  toLLVM_tycontents l
+
+let toLLVM_range (r, _) =
+  let filename = 
+    if r.start_p.pos_fname <> "" then
+      "\"File \\\"" ^ r.start_p.pos_fname ^ "\\\", \"" else "\"\"" in
+  let filename_global = define_global ".range_filename" (const_stringz context filename) the_module in
+  set_linkage Linkage.Private filename_global;
+  let filename_ptr = const_gep ptr_t filename_global [| const_int uint32_t 0; const_int uint32_t 0|] in
+  let startline = const_int uint32_t r.start_p.pos_lnum in
+  let startchr = const_int uint32_t (r.start_p.pos_cnum - r.start_p.pos_bol) in
+  let endline = const_int uint32_t r.end_p.pos_lnum in
+  let endchr = const_int uint32_t (r.end_p.pos_cnum - r.end_p.pos_bol) in
+  const_named_struct range_t [| filename_ptr; startline; startchr; endline; endchr|]
+
+let toLLVM_ranges ranges = 
+  let sorted = List.sort (fun (_, i1) (_, i2) -> compare i1 i2) ranges in
+  let entries = Array.of_list (List.map toLLVM_range sorted) in
+  (* let arr_t = array_type range_t (Array.length entries) in *)
+  let arr = const_array range_t entries in
+  let g = define_global "local_range_list" arr the_module in
+  set_linkage Linkage.Internal g
+
+let toLLVM_crcdecl (_, name) =
+  ignore (declare_global crc_t name the_module)
+
+let toLLVM_crcdecls l = 
+  List.iter toLLVM_crcdecl l
+
+let rec check_has_tv = function
+  | CId -> false
+  | CSeqInj (c', _) | CSeqProj (_, _, c') | CList c' -> check_has_tv c'
+  | CTvInj _ | CTvProj _ -> true
+  | CFun (c1, c2) -> (check_has_tv c1) || (check_has_tv c2)
+  | CTuple cs -> List.fold_left (fun b c -> b || check_has_tv c) false cs
+
+(* コアーションの定義 *)
+(* let toLLVM_crccontent (c, name) = 
+  let has_tv_val = if check_has_tv c then 1 else 0 in
+  let llvm_of_crc c = match c with
+  | CId -> "&crc_id"
+  | CSeqInj (CId, g) -> Format.asprintf "&crc_inj_%a" toC_tag g
+  | _ -> "&" ^ CrcManager.find c 
+  in match c with
+  | CSeqInj (c', g) ->
+    let arity_str = match g with Tp arity -> Format.asprintf ", .arity_inj = %d" arity | _ -> "" in
+    fprintf ppf "static crc %s = { .crckind = SEQ_INJ, .g_inj = G_%a%s, .has_tv = %d, .crcdat.seq_tv = { .ptr.s = (crc*)%s } };"
+      name
+      toC_tag g
+      arity_str
+      has_tv_val
+      (llvm_of_crc c')
+  | CSeqProj (g, (rid, p), c') -> 
+    let arity_str = match g with Tp arity -> Format.asprintf ", .arity_proj = %d" arity | _ -> "" in
+    fprintf ppf "static crc %s = { .crckind = SEQ_PROJ, .g_proj = G_%a%s, .p_proj = %d,  .has_tv = %d, .crcdat.seq_tv = { .rid_proj = %d, .ptr.s = (crc*)%s } };"
+      name
+      toC_tag g
+      arity_str
+      (match p with Pos -> 1 | Neg -> 0)
+      has_tv_val
+      rid
+      (llvm_of_crc c')
+  | CTuple cs ->
+    let arity = List.length cs in
+    let crcs_str = String.concat ", " (List.map (fun c -> "(crc*)" ^ c_of_crc c) cs) in
+    fprintf ppf "static crc *%s_crcs[] = { %s };\n" name crcs_str;
+    fprintf ppf "static crc %s = { .crckind = TUPLE, .has_tv = %d, .crcdat.tpl_crc = { .arity = %d, .crcs = %s_crcs } };"
+      name has_tv_val arity name
+  | CTvInj (tv, (rid, p)) ->
+    fprintf ppf "static crc %s = { .crckind = TV_INJ, .p_inj = %d, .has_tv = %d, .crcdat.seq_tv = { .rid_inj = %d, .ptr.tv = %s } };"
+      name
+      (match p with Pos -> 1 | Neg -> 0)
+      has_tv_val
+      rid
+      (llvm_of_ty (TyVar tv))
+  | CTvProj (tv, (rid, p)) ->
+    fprintf ppf "static crc %s = { .crckind = TV_PROJ, .p_proj = %d, .has_tv = %d, .crcdat.seq_tv = { .rid_proj = %d, .ptr.tv = %s } };"
+      name
+      (match p with Pos -> 1 | Neg -> 0)
+      has_tv_val
+      rid
+      (llvm_of_ty (TyVar tv))
+  | CFun (c1, c2) -> 
+    fprintf ppf "static crc %s = { .crckind = FUN, .has_tv = %d, .crcdat.fun_crc = { .c1 = %s, .c2 = %s } };"
+      name
+      has_tv_val
+      (llvm_of_crc c1)
+      (llvm_of_crc c2)
+  | CList c' ->
+    fprintf ppf "static crc %s = { .crckind = LIST, .has_tv = %d, .crcdat.lst_crc = %s };"
+      name
+      has_tv_val
+      (llvm_of_crc c') 
+  | _ -> raise @@ ToLLVM_bug "not in crccontent" *)
+
+(* let toLLVM_crccontents l = 
+  List.iter toLLVM_crccontent l  *)
+
+(*型定義全体を記述*)
+let register_static_crc (_, name) = 
+  let arg = 
+    match lookup_global name the_module with
+      | Some g -> g
+      | None -> raise @@ ToLLVM_bug "undeclared crc"
+    in 
+  let fn_t = function_type void_t [|ptr_t|] in
+  let args = [|arg|] in
+  ignore(call_function "register_static_crc" fn_t args "")
+
+(* let toLLVM_crcs l ~config =
+  let register_builtins () =
+    register_static_crc ( "", "crc_id");
+    register_static_crc ( "", "crc_inj_INT");
+    register_static_crc ( "", "crc_inj_BOOL");
+    register_static_crc ( "", "crc_inj_UNIT");
+    register_static_crc ( "", "crc_inj_AR");
+    register_static_crc ( "", "crc_inj_LI")
+  in
+  if config.static then ()
+  else 
+    let init_crcs_ty = function_type void_t [||] in
+    let init_crcs = define_function "init_crcs" init_crcs_ty the_module in
+    set_linkage Linkage.Internal init_crcs;
+    let bb = entry_block init_crcs in
+    position_at_end bb builder;
+    toLLVM_crcdecls l;
+    (* toLLVM_crccontents l; *)
+    register_builtins ();
+    List.iter register_static_crc l;
+    ignore (build_ret_void builder) *)
 
 let toLLVM_fv named_valuesf x=
   let idx = !cnt_env_llvm in
@@ -1525,16 +1925,22 @@ let toLLVM_fundef fundef ~config = match fundef with
   | FundefD { name = l; tvs = (tvs, _); arg = (x, y); formal_fv = fvl; body = f } ->
     let named_valuesf:(string, llvalue) Hashtbl.t = Hashtbl.create 16 in
     cnt_env_llvm := 0;
-    let func_t = function_type value_t [|value_t; value_t ; value_t|] in
-    let func = define_function ("fun_" ^ l)  func_t the_module in
+    (* let func_t = function_type value_t [|value_t; value_t ; value_t|] in *)
+    Printf.eprintf "test3\n%!";
+    let func = match lookup_function ("fun_" ^ l) the_module with
+      | Some f -> f   (* use existing declaration from label *)
+      | None -> raise @@ ToLLVM_bug "Should have been declared already"
+    in
+    Printf.eprintf "test4\n%!";
     set_linkage Linkage.Internal func;
-    let bb = entry_block func in
+    let bb = append_block context "entry" func in 
     position_at_end bb builder;
     let args = params func in
     (* Maybe i should make a local hashtable to which these arguments are loaded. which then can be called by the body? *)
     set_value_name "cls" args.(0);
     set_value_name x args.(1);
     set_value_name y args.(2);
+    Printf.eprintf "test5\n%!";
     let cls_ptr = build_alloca int_t "cls" builder in
     ignore(build_store args.(0) cls_ptr builder);
     let x_ptr = build_alloca int_t x builder in
@@ -1549,17 +1955,18 @@ let toLLVM_fundef fundef ~config = match fundef with
     toLLVM_tvs named_valuesf tvs args.(0);
     let result = toLLVM_exp named_valuesf f ~config in
     ignore(build_ret result builder);
-    dump_module the_module;
-    Printf.eprintf "FundefD: %s\n%!" l;
-
+    Printf.eprintf "FundefD: %s\n%!" l
   | FundefM { name = l; tvs = (tvs, _); arg = x; formal_fv = fvl; body = f }  ->
     let named_valuesf:(string, llvalue) Hashtbl.t = Hashtbl.create 16 in
     cnt_env_llvm := 0;
-    let func_t = function_type value_t [|value_t; value_t|] in
+    (* let func_t = function_type value_t [|value_t; value_t|] in *)
     let l_alt = if config.alt then ("alt_" ^ l) else l in 
-    let func = define_function ("fun_" ^ l_alt)  func_t the_module in
+    let func = match lookup_function ("fun_" ^ l_alt) the_module with
+      | Some f -> f   (* use existing declaration from predeclare *)
+      | None -> raise @@ ToLLVM_bug "Should have been declared already"
+    in
     set_linkage Linkage.Internal func;
-    let bb = entry_block func in
+    let bb = append_block context "entry" func in 
     position_at_end bb builder;
     let args = params func in
     set_value_name "cls" args.(0);
@@ -1574,14 +1981,18 @@ let toLLVM_fundef fundef ~config = match fundef with
     toLLVM_fvs named_valuesf fvl;
     toLLVM_tvs named_valuesf tvs args.(0);
     let result = toLLVM_exp named_valuesf f ~config in
-    ignore(build_ret result builder)
+    ignore(build_ret result builder);
+    Printf.eprintf "FundefM: %s\n%!" l
   | FundefTy { name = l; tvs = (tvs, _); formal_fv = fvl; body = f } ->
     let named_valuesf:(string, llvalue) Hashtbl.t = Hashtbl.create 16 in
     cnt_env_llvm := 0;
-    let func_t = function_type value_t [|value_t; value_t|] in
-    let func = define_function ("tfun_" ^ l)  func_t the_module in
+    (* let func_t = function_type value_t [|value_t; value_t|] in *)
+    let func = match lookup_function ("tfun_" ^ l) the_module with
+      | Some f -> f   (* use existing declaration from predeclare *)
+      | None -> raise @@ ToLLVM_bug "Should have been declared already"
+    in
     set_linkage Linkage.Internal func;
-    let bb = entry_block func in
+    let bb = append_block context "entry" func in 
     position_at_end bb builder;
     let args = params func in
     set_value_name "cls" args.(0);
@@ -1596,10 +2007,12 @@ let toLLVM_fundef fundef ~config = match fundef with
     toLLVM_fvs named_valuesf fvl;
     toLLVM_tvs named_valuesf tvs args.(0);
     let result = toLLVM_exp named_valuesf f ~config in
-    ignore(build_ret result builder)
+    ignore(build_ret result builder);
+    Printf.eprintf "FundefTy: %s\n%!" l
 
 let toLLVM_fundefs toplevel ~config =
   List.iter (toLLVM_label  ~config) toplevel;
+  Printf.eprintf "test2\n%!";
   List.iter (toLLVM_fundef ~config) toplevel
 
   (* No normal logical operators and no binary operators? *)
@@ -1607,23 +2020,37 @@ let toLLVM_fundefs toplevel ~config =
 (* We can use the module to remember previous instructions and therefore *)
 (* create a continuous REPL, and add functionality to clear some of the instructions? *)
 (* we could have each run create its own snippet of code, which are linked and released at the end? *)
+
 let toC_program ?(bench=0) ~config ppf (Prog (toplevel, f)) =
   let tys = TyManager.get_definitions () in
   let ranges = RangeManager.get_definitions () in
   let crcs = CrcManager.get_definitions () in
   let init_crcs = if config.static then "" else "#ifdef HASH\ninit_crcs();\n#endif\n" in
   runtime ();
+  declare_ty_globals ();
+  toLLVM_tys tys;
+  toLLVM_ranges ranges;
+  declare_crc_globals ();
+  (* (toLLVM_crcs ~config) crcs; *)
+  Printf.eprintf "test1\n%!";
   toLLVM_fundefs toplevel ~config;
+  (* in toC_program, before defining main *)
+  if not config.static then begin
+    let g = define_global "range_list" (const_null ptr_t) the_module in
+    set_linkage Linkage.External g
+  end;
   let main_t = function_type int_t [||] in
   let main = define_function "main" main_t the_module in
   let bb = entry_block main in
   position_at_end bb builder;
-  (* ignore(toLLVM_exp f ~config);
-  ignore(build_ret (const_int int_t 0) builder); *)
+  let fn_t = function_type void_t [||] in
+  ignore (call_function "GC_init" fn_t [||] "");
   let named_values:(string, llvalue) Hashtbl.t = Hashtbl.create 16 in
-  let result = toLLVM_exp named_values f ~config in
-  ignore(build_ret result builder);
+  ignore(toLLVM_exp named_values f ~config);
+  ignore(build_ret (const_int int_t 0) builder);
   dump_module the_module;
+  Llvm_analysis.assert_valid_module the_module;
+  Llvm.print_module "result_C/output.ll" the_module;
   fprintf ppf "%s\n%s\n%a%a%a%a%s%s%s%a%s"
     (asprintf "#include <gc.h>\n#include \"../%slibC/runtime.h\"\n"
       (if bench = 0 then "" else "../../"))
